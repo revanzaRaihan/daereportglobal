@@ -9,6 +9,7 @@ import { APP_CONFIG } from '@/lib/branding'
 import { Mail, Lock, Eye, EyeOff, Loader2, Sun, Moon, ArrowRight, Languages } from 'lucide-react'
 import { useTheme } from '@/components/ThemeProvider'
 import { useTranslation } from '@/components/LocaleProvider'
+import { clearCachedData } from '@/lib/dataCache'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -39,6 +40,7 @@ export default function LoginPage() {
   const handleGoogleLogin = async () => {
     setGoogleLoading(true)
     setErrorMsg('')
+    clearCachedData()
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -94,6 +96,7 @@ export default function LoginPage() {
               : error.message
           )
         } else {
+          clearCachedData()
           router.refresh()
           router.push('/')
         }

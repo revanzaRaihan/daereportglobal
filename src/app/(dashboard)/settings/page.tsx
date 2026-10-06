@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 import CustomSelect from '@/components/CustomSelect'
 import { useTranslation } from '@/components/LocaleProvider'
@@ -23,6 +24,7 @@ import {
 } from 'lucide-react'
 
 export default function SettingsPage() {
+  const router = useRouter()
   const supabase = createClient()
   const { t, locale: currentLocale, setLocale: updateGlobalLocale } = useTranslation()
 
@@ -38,7 +40,7 @@ export default function SettingsPage() {
 
   // Personalized Teacher Profile states
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-  const [teacherName, setTeacherName] = useState(() => cachedSettings?.teacher_name || '')
+  const [teacherName, setTeacherName] = useState('')
   const [userEmail, setUserEmail] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
   const [studentCount, setStudentCount] = useState<number | null>(cachedStudentCount ?? null)
@@ -90,14 +92,16 @@ export default function SettingsPage() {
         const loc = settingsMap.get('app_locale') || 'id'
 
         // Account-personalized teacher name:
-        // Priority 1: Auth user_metadata
-        // Priority 2: Account specific key in app_settings (teacher_name_{userId})
-        // Priority 3: Global fallback in app_settings (teacher_name)
+        // Priority 1: Auth user_metadata.teacher_name
+        // Priority 2: Auth user_metadata.full_name / name (e.g. from Google OAuth)
+        // Priority 3: Account specific key in app_settings (teacher_name_{userId})
+        // Default fallback: Email username prefix
         const userTeacherName = 
           user?.user_metadata?.teacher_name || 
-          user?.user_metadata?.display_name || 
+          user?.user_metadata?.full_name || 
+          user?.user_metadata?.name || 
           (user ? settingsMap.get(`teacher_name_${user.id}`) : '') || 
-          settingsMap.get('teacher_name') || ''
+          (user?.email ? user.email.split('@')[0] : '')
 
         setProvider(prov)
         setModel(md)
@@ -158,42 +162,51 @@ export default function SettingsPage() {
 
     try {
       // Build upsert payload
-      const upserts = [
-        { key: 'ai_provider', value: provider },
-        { key: 'ai_model', value: model },
-        { key: 'admin_wa_number', value: waNumber },
-        { key: 'app_locale', value: locale }
-      ]
+      const upserts: { key: string; value: string }[] = []
 
-      // Account-personalized teacher name storage
-      if (currentUserId) {
+      // System-level configs (AI provider, model, API key, WA number) are strictly admin-only
+      if (isAdmin) {
+        upserts.push(
+          { key: 'ai_provider', value: provider },
+          { key: 'ai_model', value: model },
+          { key: 'admin_wa_number', value: waNumber },
+          { key: 'app_locale', value: locale }
+        )
+
+        // Only upsert API Key if it's been edited and doesn't contain asterisks (which would be the masked placeholder)
+        if (keyModified && !apiKey.includes('*')) {
+          upserts.push({ key: 'ai_api_key', value: apiKey.trim() })
+        } else if (keyModified && !apiKey.trim()) {
+          // If cleared to empty, save empty string to remove it
+          upserts.push({ key: 'ai_api_key', value: '' })
+        }
+      }
+
+      // Teacher personalized name storage (allowed for all authenticated accounts)
+      if (currentUserId && teacherName.trim()) {
         upserts.push({ key: `teacher_name_${currentUserId}`, value: teacherName.trim() })
       }
-      // Also update base teacher_name for admin/general visibility
-      upserts.push({ key: 'teacher_name', value: teacherName.trim() })
 
-      // Only upsert API Key if it's been edited and doesn't contain asterisks (which would be the masked placeholder)
-      if (keyModified && !apiKey.includes('*')) {
-        upserts.push({ key: 'ai_api_key', value: apiKey.trim() })
-      } else if (keyModified && !apiKey.trim()) {
-        // If cleared to empty, save empty string to remove it
-        upserts.push({ key: 'ai_api_key', value: '' })
+      if (upserts.length > 0) {
+        const { error } = await supabase.from('app_settings').upsert(upserts)
+        if (error) throw error
       }
 
-      const { error } = await supabase.from('app_settings').upsert(upserts)
-      if (error) throw error
-
       // Also persist teacher's name directly in Supabase auth user_metadata for this account
-      await supabase.auth.updateUser({
-        data: {
-          teacher_name: teacherName.trim(),
-          display_name: teacherName.trim()
-        }
-      })
+      if (teacherName.trim()) {
+        await supabase.auth.updateUser({
+          data: {
+            teacher_name: teacherName.trim(),
+            full_name: teacherName.trim(),
+            display_name: teacherName.trim()
+          }
+        })
+      }
 
       await updateGlobalLocale(locale as 'id' | 'en')
       triggerToast('success', t('msg_settings_saved'))
       fetchSettings()
+      router.refresh()
     } catch (err: any) {
       triggerToast('error', err.message || t('msg_settings_failed'))
     } finally {
@@ -350,93 +363,152 @@ export default function SettingsPage() {
                 </div>
 
                 {/* WA Number */}
-                <div>
-                  <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5 font-mono">
-                    <Smartphone className="w-3.5 h-3.5 text-neutral-400" />
-                    {t('label_wa')}
-                  </label>
-                  <input
-                    type="text"
-                    value={waNumber}
-                    onChange={(e) => setWaNumber(e.target.value)}
-                    placeholder="Contoh: 628123456789"
-                    className="form-input-premium"
-                  />
-                  <p className="text-[10px] text-neutral-500 mt-1.5 font-medium">
-                    {currentLocale === 'id'
-                      ? 'Nomor WhatsApp untuk pengiriman salinan laporan progres murid.'
-                      : 'WhatsApp number for sending student progress report copies.'}
-                  </p>
-                </div>
+                {isAdmin ? (
+                  <div>
+                    <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5 font-mono">
+                      <Smartphone className="w-3.5 h-3.5 text-neutral-400" />
+                      {t('label_wa')}
+                    </label>
+                    <input
+                      type="text"
+                      value={waNumber}
+                      onChange={(e) => setWaNumber(e.target.value)}
+                      placeholder="Contoh: 628123456789"
+                      className="form-input-premium"
+                    />
+                    <p className="text-[10px] text-neutral-500 mt-1.5 font-medium">
+                      {currentLocale === 'id'
+                        ? 'Nomor WhatsApp untuk pengiriman salinan laporan progres murid.'
+                        : 'WhatsApp number for sending student progress report copies.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5 font-mono">
+                      <Smartphone className="w-3.5 h-3.5 text-neutral-400" />
+                      {t('label_wa')}
+                    </label>
+                    <p className="text-xs font-mono text-neutral-700 bg-neutral-50 border border-black/5 rounded-xl px-3.5 py-2.5">
+                      {waNumber || (currentLocale === 'id' ? 'Belum dikonfigurasi admin cabang' : 'Not configured by branch admin')}
+                    </p>
+                  </div>
+                )}
               </div>
 
             </div>
 
             {/* COLUMN 2: AI Credentials */}
-            <div className="bg-white border border-black/10 rounded-2xl p-5 space-y-4 shadow-none transition-all duration-350 ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-black/30">
-              <h3 className="text-xs font-bold text-black uppercase tracking-widest flex items-center gap-1.5 pb-3 border-b border-black/10 font-mono">
-                <Sparkles className="w-4 h-4 text-[#4da23c]" />
-                {t('settings_sec_ai')}
-              </h3>
-
-              {/* Provider Select */}
-              <div>
-                <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5 font-mono">
-                  {t('label_provider')}
-                </label>
-                <CustomSelect
-                  options={[
-                    { value: 'gemini', label: 'Google Gemini AI' },
-                    { value: 'groq', label: 'Groq Cloud API' }
-                  ]}
-                  value={provider}
-                  onChange={handleProviderChange}
-                  isSearchable={false}
-                />
-              </div>
-
-              {/* Model Select */}
-              <div>
-                <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5 font-mono">
-                  {t('label_model')}
-                </label>
-                <CustomSelect
-                  options={modelOptions}
-                  value={model}
-                  onChange={(val) => setModel(val)}
-                  isSearchable={false}
-                />
-              </div>
-
-              {/* API Key Input */}
-              <div>
-                <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5 font-mono">
-                  <Key className="w-3.5 h-3.5 text-neutral-400" />
-                  API Key
-                </label>
-                <div className="relative">
-                  <input
-                    type={showKey ? 'text' : 'password'}
-                    value={apiKey}
-                    onChange={(e) => handleKeyChange(e.target.value)}
-                    placeholder={provider === 'gemini' ? 'AIzaSy...' : 'gsk_...'}
-                    className="form-input-premium pr-12 font-mono"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowKey(!showKey)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black p-1"
-                  >
-                    {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+            {isAdmin ? (
+              <div className="bg-white border border-black/10 rounded-2xl p-5 space-y-4 shadow-none transition-all duration-350 ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-black/30">
+                <div className="flex items-center justify-between pb-3 border-b border-black/10">
+                  <h3 className="text-xs font-bold text-black uppercase tracking-widest flex items-center gap-1.5 font-mono">
+                    <Sparkles className="w-4 h-4 text-[#4da23c]" />
+                    {t('settings_sec_ai')}
+                  </h3>
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-[#4da23c]/10 text-[#4da23c] border border-[#4da23c]/20">
+                    {t('role_branch_admin')}
+                  </span>
                 </div>
-                <p className="text-[10px] text-neutral-500 mt-1.5 leading-relaxed font-medium">
-                  {currentLocale === 'id' 
-                    ? 'Kredensial API Key ini disimpan aman di database server Supabase Anda dan tidak pernah dipublikasikan keluar.' 
-                    : 'This API Key is stored securely in your Supabase database and is never exposed publicly.'}
-                </p>
+
+                {/* Provider Select */}
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5 font-mono">
+                    {t('label_provider')}
+                  </label>
+                  <CustomSelect
+                    options={[
+                      { value: 'gemini', label: 'Google Gemini AI' },
+                      { value: 'groq', label: 'Groq Cloud API' }
+                    ]}
+                    value={provider}
+                    onChange={handleProviderChange}
+                    isSearchable={false}
+                  />
+                </div>
+
+                {/* Model Select */}
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5 font-mono">
+                    {t('label_model')}
+                  </label>
+                  <CustomSelect
+                    options={modelOptions}
+                    value={model}
+                    onChange={(val) => setModel(val)}
+                    isSearchable={false}
+                  />
+                </div>
+
+                {/* API Key Input */}
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5 font-mono">
+                    <Key className="w-3.5 h-3.5 text-neutral-400" />
+                    API Key
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showKey ? 'text' : 'password'}
+                      value={apiKey}
+                      onChange={(e) => handleKeyChange(e.target.value)}
+                      placeholder={provider === 'gemini' ? 'AIzaSy...' : 'gsk_...'}
+                      className="form-input-premium pr-12 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowKey(!showKey)}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black p-1"
+                    >
+                      {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-neutral-500 mt-1.5 leading-relaxed font-medium">
+                    {currentLocale === 'id' 
+                      ? 'Kredensial API Key ini disimpan aman di database server Supabase Anda dan tidak pernah dipublikasikan keluar.' 
+                      : 'This API Key is stored securely in your Supabase database and is never exposed publicly.'}
+                  </p>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="bg-white border border-black/10 rounded-2xl p-5 space-y-4 shadow-none">
+                <div className="flex items-center justify-between pb-3 border-b border-black/10">
+                  <h3 className="text-xs font-bold text-black uppercase tracking-widest flex items-center gap-1.5 font-mono">
+                    <Sparkles className="w-4 h-4 text-[#4da23c]" />
+                    {t('settings_sec_ai')}
+                  </h3>
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-neutral-100 text-neutral-600 border border-neutral-200">
+                    {currentLocale === 'id' ? 'Terkoneksi' : 'Connected'}
+                  </span>
+                </div>
+
+                <div className="p-4 rounded-xl bg-neutral-50 border border-black/5 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-[#4da23c]/15 text-[#4da23c] flex items-center justify-center shrink-0 mt-0.5">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-black">
+                        {currentLocale === 'id' ? 'Mesin AI Dikelola Administrator' : 'AI Engine Managed by Admin'}
+                      </p>
+                      <p className="text-[11px] text-neutral-500 mt-1 leading-relaxed">
+                        {currentLocale === 'id'
+                          ? 'Konfigurasi provider, kuota token, dan model AI dikelola terpusat oleh Admin Cabang. Anda dapat langsung membuat laporan belajar tanpa perlu mengatur kredensial teknis.'
+                          : 'AI provider, token quota, and models are centrally managed by the Branch Admin. You can generate student reports without configuring technical credentials.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-black/5 flex items-center justify-between text-[11px] font-mono">
+                    <span className="text-neutral-400">
+                      {currentLocale === 'id' ? 'Status Layanan' : 'Service Status'}
+                    </span>
+                    <span className="font-bold text-[#4da23c] flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-[#4da23c] animate-pulse"></span>
+                      {currentLocale === 'id' ? 'Aktif & Siap Pakai' : 'Active & Ready'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
           </div>
 

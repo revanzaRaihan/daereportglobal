@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { Metadata } from 'next'
 import { Plus_Jakarta_Sans, Fredoka } from 'next/font/google'
+import { createAdminClient } from '@/utils/supabase/admin'
 import { createClient } from '@/utils/supabase/server'
 import { slugify } from '@/lib/slug'
 import { APP_CONFIG } from '@/lib/branding'
@@ -100,7 +101,7 @@ function parseReportContent(content: string, materi: string) {
 }
 
 async function getStudentAndReports(slug: string) {
-  const supabase = await createClient()
+  const supabase = createAdminClient() || (await createClient())
 
   // 1. Fetch targeted student directly by slug (specific columns only to prevent data leakage)
   let { data: student, error: studentError } = await supabase

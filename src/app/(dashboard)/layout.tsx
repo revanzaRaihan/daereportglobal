@@ -8,7 +8,7 @@ import Logo from '@/components/Logo'
 import { APP_CONFIG } from '@/lib/branding'
 import { useTranslation } from '@/components/LocaleProvider'
 import { useNavigationProgress } from '@/components/NavigationProgress'
-import { prefetchRouteData } from '@/lib/dataCache'
+import { prefetchRouteData, clearCachedData } from '@/lib/dataCache'
 import { 
   Users, 
   BookOpen, 
@@ -44,6 +44,7 @@ export default function DashboardLayout({
   
   // Auth & UI States
   const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [teacherName, setTeacherName] = useState<string>('')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showLogoutModal, setShowLogoutModal] = useState(false)
@@ -95,6 +96,12 @@ export default function DashboardLayout({
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         setUserEmail(user.email || null)
+        const name = 
+          user.user_metadata?.teacher_name || 
+          user.user_metadata?.full_name || 
+          user.user_metadata?.name || 
+          (user.email ? user.email.split('@')[0] : '')
+        setTeacherName(name)
         await fetchKpis(user.id)
       }
       setLoading(false)
@@ -119,6 +126,7 @@ export default function DashboardLayout({
   const handleLogout = async () => {
     setLoggingOut(true)
     try {
+      clearCachedData()
       await supabase.auth.signOut()
       router.refresh()
       router.push('/login')
@@ -149,7 +157,12 @@ export default function DashboardLayout({
   ]
 
   const getInitials = (name: string) => {
-    return name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
+    if (!name) return 'U'
+    const parts = name.trim().split(/\s+/)
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase()
+    }
+    return name.slice(0, 2).toUpperCase()
   }
 
   return (
@@ -246,10 +259,10 @@ export default function DashboardLayout({
             <div className="flex items-center justify-between p-3 bg-card border border-border-color rounded-xl shadow-none">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center text-xs font-bold font-mono">
-                  {userEmail ? getInitials(userEmail) : 'AI'}
+                  {teacherName ? getInitials(teacherName) : (userEmail ? getInitials(userEmail) : 'AI')}
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs font-bold text-text-primary truncate">{t('nav_role')}</p>
+                  <p className="text-xs font-bold text-text-primary truncate">{teacherName || t('nav_role')}</p>
                   <p className="text-[10px] text-text-secondary truncate max-w-[110px] font-mono">{userEmail || 'Memuat...'}</p>
                 </div>
               </div>

@@ -164,7 +164,7 @@ BEGIN
   NEW.slug := candidate_slug;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Pasang Trigger Auto-Slug pada Tabel STUDENTS
 DROP TRIGGER IF EXISTS trg_generate_student_slug ON public.students;
@@ -191,6 +191,7 @@ BEGIN
         u.id AS teacher_id,
         u.email,
         COALESCE(
+            NULLIF(trim(u.raw_user_meta_data->>'teacher_name'), ''),
             NULLIF(trim(u.raw_user_meta_data->>'full_name'), ''),
             NULLIF(trim(u.raw_user_meta_data->>'name'), ''),
             split_part(u.email, '@', 1)
@@ -223,6 +224,7 @@ BEGIN
         u.id AS teacher_id,
         u.email,
         COALESCE(
+            NULLIF(trim(u.raw_user_meta_data->>'teacher_name'), ''),
             NULLIF(trim(u.raw_user_meta_data->>'full_name'), ''),
             NULLIF(trim(u.raw_user_meta_data->>'name'), ''),
             split_part(u.email, '@', 1)
@@ -253,6 +255,7 @@ BEGIN
         u.id AS teacher_id,
         u.email,
         COALESCE(
+            NULLIF(trim(u.raw_user_meta_data->>'teacher_name'), ''),
             NULLIF(trim(u.raw_user_meta_data->>'full_name'), ''),
             NULLIF(trim(u.raw_user_meta_data->>'name'), ''),
             split_part(u.email, '@', 1)
@@ -333,7 +336,7 @@ ALTER TABLE public.feedbacks ENABLE ROW LEVEL SECURITY;
 -- 4.1 Policies Tabel STUDENTS
 DROP POLICY IF EXISTS "Allow anonymous read on students" ON public.students;
 CREATE POLICY "Allow anonymous read on students" 
-    ON public.students FOR SELECT TO anon, authenticated 
+    ON public.students FOR SELECT TO anon 
     USING (true);
 
 DROP POLICY IF EXISTS "Users can perform all actions on their own students" ON public.students;
@@ -345,7 +348,7 @@ CREATE POLICY "Users can perform all actions on their own students"
 -- 4.2 Policies Tabel REPORTS
 DROP POLICY IF EXISTS "Allow anonymous read on reports" ON public.reports;
 CREATE POLICY "Allow anonymous read on reports" 
-    ON public.reports FOR SELECT TO anon, authenticated 
+    ON public.reports FOR SELECT TO anon 
     USING (true);
 
 DROP POLICY IF EXISTS "Users can perform all actions on their own reports" ON public.reports;
