@@ -65,3 +65,6 @@ next-env.d.ts
 # internal developer temporary review and scratch files
 *.scratch.*
 /scratch/
+
+# internal audit tracking files (ignored from git)
+/docs/audits/

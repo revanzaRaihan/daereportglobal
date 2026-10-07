@@ -128,10 +128,9 @@ Karena pendaftaran publik mandiri telah ditutup demi keamanan kuota AI dan priva
 
 ## 5. Dokumentasi & Panduan Lanjutan
 
-Pelajari panduan spesifik dan mendalam lainnya yang tersedia di repositori ini:
-- 🚀 **[Panduan Lengkap Implementasi dari Nol (`docs/specifics/GUIDELINE_IMPLEMENTASI_DARI_NOL.md`)](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/docs/specifics/GUIDELINE_IMPLEMENTASI_DARI_NOL.md)**
-- 🎨 **[Panduan Kustomisasi Brand & White-Labeling (`docs/WHITE_LABEL_GUIDE.md`)](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/docs/WHITE_LABEL_GUIDE.md)**
-- 🛡️ **[Laporan Audit Keamanan & Alur Kerja (`docs/AUDIT_WORKFLOW_DAN_KEAMANAN_SISTEM.md`)](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/docs/AUDIT_WORKFLOW_DAN_KEAMANAN_SISTEM.md)**
+Pelajari panduan resmi lainnya yang tersedia di dalam folder [`docs/guides/`](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/docs/guides/):
+- 🚀 **[Panduan Lengkap Implementasi dari Nol (`docs/guides/GUIDELINE_IMPLEMENTASI_DARI_NOL.md`)](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/docs/guides/GUIDELINE_IMPLEMENTASI_DARI_NOL.md)**
+- 🎨 **[Panduan Kustomisasi Brand & White-Labeling (`docs/guides/WHITE_LABEL_GUIDE.md`)](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/docs/guides/WHITE_LABEL_GUIDE.md)**
 
 ---
 
