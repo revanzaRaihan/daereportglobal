@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS public.students (
     meeting_count INT NOT NULL DEFAULT 0,
     first_meeting_date DATE,
     slug TEXT,
+    language VARCHAR(10) NOT NULL DEFAULT 'id',
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),

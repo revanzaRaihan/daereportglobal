@@ -9,6 +9,10 @@ import CustomDatePicker from '@/components/CustomDatePicker'
 import { useTranslation } from '@/components/LocaleProvider'
 import { getCachedData, setCachedData } from '@/lib/dataCache'
 import { 
+  fetchStudentLanguageMap, 
+  resolveStudentLanguage 
+} from '@/lib/studentLanguage'
+import { 
   Sparkles, 
   PenTool,
   Send, 
@@ -38,6 +42,7 @@ export default function LaporanBuilderPage() {
   
   // Data States
   const [students, setStudents] = useState<any[]>(cachedStudents || [])
+  const [languageMap, setLanguageMap] = useState<Record<string, 'id' | 'en'>>({})
   const [datasetCount, setDatasetCount] = useState<number>(cachedDatasetCount ?? 0)
   
   // Form Inputs
@@ -160,23 +165,25 @@ export default function LaporanBuilderPage() {
       if (user) {
         setUserId(user.id)
         
-        // Fetch students
-        const { data: studentsData } = await supabase
-          .from('students')
-          .select('*')
-          .order('name')
+        // Fetch students & language fallback map
+        const [studentsRes, langMapRes, datasetRes] = await Promise.all([
+          supabase.from('students').select('*').order('name'),
+          fetchStudentLanguageMap(supabase),
+          supabase.from('dataset_entries').select('*', { count: 'exact', head: true })
+        ])
 
-        // Fetch dataset counts
-        const { count } = await supabase
-          .from('dataset_entries')
-          .select('*', { count: 'exact', head: true })
-
+        setLanguageMap(langMapRes)
+        const count = datasetRes.count
         setDatasetCount(count || 0)
         setCachedData('dataset_count', count || 0)
 
-        if (studentsData) {
-          setStudents(studentsData)
-          setCachedData('students', studentsData)
+        if (studentsRes.data) {
+          const enrichedStudents = studentsRes.data.map(s => ({
+            ...s,
+            language: s.language || langMapRes[s.id] || 'id'
+          }))
+          setStudents(enrichedStudents)
+          setCachedData('students', enrichedStudents)
 
           // Fetch reports to calculate next meeting numbers and dates
           const { data: reportsData } = await supabase
@@ -195,7 +202,7 @@ export default function LaporanBuilderPage() {
           const meetNums: Record<string, number> = {}
           const nextDates: Record<string, string> = {}
 
-          studentsData.forEach(s => {
+          enrichedStudents.forEach(s => {
             const lastReport = latestReports[s.id]
             const nextMeet = lastReport ? Number(lastReport.meeting_number) + 1 : Number(s.meeting_count || 0) + 1
             meetNums[s.id] = nextMeet
@@ -220,12 +227,12 @@ export default function LaporanBuilderPage() {
     initPage()
   }, [supabase])
 
-  // Keep local language in sync with global locale
+  // Keep local language in sync with global locale only if no student is selected
   useEffect(() => {
-    if (locale === 'id' || locale === 'en') {
+    if (!selectedStudentId && (locale === 'id' || locale === 'en')) {
       setLanguage(locale)
     }
-  }, [locale])
+  }, [locale, selectedStudentId])
 
   const handleLanguageChange = (val: 'id' | 'en') => {
     setLanguage(val)
@@ -244,6 +251,24 @@ export default function LaporanBuilderPage() {
     if (id) {
       setMeetingNumber(meetingNumbersMap[id] || 1)
       setReportDate(nextDatesMap[id] || '')
+
+      // Auto-detect and bind language from student data
+      const student = students.find(s => s.id === id)
+      if (student) {
+        const studentLang = resolveStudentLanguage(student, languageMap)
+        setLanguage(studentLang)
+
+        if (mode === 'manual' && generatedText) {
+          const manualText = assembleManualReport(
+            student,
+            meetingNumbersMap[id] || 1,
+            nextDatesMap[id] || '',
+            behavior,
+            studentLang
+          )
+          setGeneratedText(manualText)
+        }
+      }
     } else {
       setMeetingNumber(1)
       setReportDate('')
@@ -404,7 +429,13 @@ export default function LaporanBuilderPage() {
 
   const currentStudent = students.find(s => s.id === selectedStudentId)
 
-  const studentOptions = students.map(s => ({ value: s.id, label: `${s.name} (${s.subject})` }))
+  const studentOptions = students.map(s => {
+    const sLang = resolveStudentLanguage(s, languageMap)
+    return { 
+      value: s.id, 
+      label: `${s.name} (${s.subject}) • ${sLang.toUpperCase()}` 
+    }
+  })
 
   const languageOptions = [
     { value: 'id', label: 'Bahasa Indonesia' },
@@ -514,8 +545,13 @@ export default function LaporanBuilderPage() {
                 {currentStudent ? currentStudent.name.substring(0, 2).toUpperCase() : 'LS'}
               </div>
               <div>
-                <h3 className="text-sm font-bold text-black leading-tight">
-                  {currentStudent ? currentStudent.name : t('select_student_prompt')}
+                <h3 className="text-sm font-bold text-black leading-tight flex items-center gap-2">
+                  <span>{currentStudent ? currentStudent.name : t('select_student_prompt')}</span>
+                  {currentStudent && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border border-black/10 bg-neutral-100 text-neutral-800">
+                      {resolveStudentLanguage(currentStudent, languageMap) === 'en' ? '🇬🇧 EN' : '🇮🇩 ID'}
+                    </span>
+                  )}
                 </h3>
                 <p className="text-xs text-neutral-550 font-medium">
                   {currentStudent ? currentStudent.subject : t('private_tutoring_desc')}

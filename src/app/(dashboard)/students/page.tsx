@@ -9,6 +9,11 @@ import { useConfirm } from '@/components/ConfirmProvider'
 import { getCachedData, setCachedData } from '@/lib/dataCache'
 import { slugify } from '@/lib/slug'
 import { 
+  fetchStudentLanguageMap, 
+  saveStudentLanguageFallback, 
+  resolveStudentLanguage 
+} from '@/lib/studentLanguage'
+import { 
   Users, 
   Plus, 
   Edit2, 
@@ -22,7 +27,8 @@ import {
   Copy,
   ArrowLeft,
   ArrowRight,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Languages
 } from 'lucide-react'
 
 export default function StudentsPage() {
@@ -55,12 +61,14 @@ export default function StudentsPage() {
 
   // Students Data States
   const [students, setStudents] = useState<any[]>(cachedStudents || [])
+  const [languageMap, setLanguageMap] = useState<Record<string, 'id' | 'en'>>({})
   const [showStudentModal, setShowStudentModal] = useState(false)
   const [editingStudent, setEditingStudent] = useState<any | null>(null)
   const [studentName, setStudentName] = useState('')
   const [studentSubject, setStudentSubject] = useState('')
   const [studentFirstMeeting, setStudentFirstMeeting] = useState('')
   const [studentMeetingCount, setStudentMeetingCount] = useState<number>(0)
+  const [studentLanguage, setStudentLanguage] = useState<'id' | 'en'>('id')
   const [searchQuery, setSearchQuery] = useState('')
 
   // Share Portal Modal State
@@ -81,14 +89,21 @@ export default function StudentsPage() {
       const userIsAdmin = user.app_metadata?.role === 'admin'
       setIsAdmin(userIsAdmin)
 
-      // 1. Fetch Students
-      const { data: studentsData } = await supabase
-        .from('students')
-        .select('*')
-        .order('name')
-      if (studentsData) {
-        setStudents(studentsData)
-        setCachedData('students', studentsData)
+      // 1. Fetch Students & Language Fallback Map
+      const [studentsRes, langMapRes] = await Promise.all([
+        supabase.from('students').select('*').order('name'),
+        fetchStudentLanguageMap(supabase)
+      ])
+
+      setLanguageMap(langMapRes)
+
+      if (studentsRes.data) {
+        const enriched = studentsRes.data.map(s => ({
+          ...s,
+          language: s.language || langMapRes[s.id] || 'id'
+        }))
+        setStudents(enriched)
+        setCachedData('students', enriched)
       }
 
       // 2. If Admin, fetch teacher overview & all registered teachers for transfer
@@ -165,11 +180,13 @@ export default function StudentsPage() {
       setStudentSubject(student.subject)
       setStudentFirstMeeting(student.first_meeting_date || '')
       setStudentMeetingCount(student.meeting_count || 0)
+      setStudentLanguage(resolveStudentLanguage(student, languageMap))
     } else {
       setStudentName('')
       setStudentSubject('')
       setStudentFirstMeeting('')
       setStudentMeetingCount(0)
+      setStudentLanguage(locale === 'en' ? 'en' : 'id')
     }
     setShowStudentModal(true)
   }
@@ -194,34 +211,77 @@ export default function StudentsPage() {
       }
 
       if (editingStudent) {
-        // Edit
+        // Edit student
+        const payload: any = {
+          name: studentName,
+          subject: studentSubject,
+          first_meeting_date: studentFirstMeeting || null,
+          meeting_count: studentMeetingCount,
+          language: studentLanguage
+        }
+
         const { error } = await supabase
           .from('students')
-          .update({
-            name: studentName,
-            subject: studentSubject,
-            first_meeting_date: studentFirstMeeting || null,
-            meeting_count: studentMeetingCount
-          })
+          .update(payload)
           .eq('id', editingStudent.id)
 
-        if (error) throw error
-        triggerToast('success', 'Data murid berhasil diperbarui.')
-      } else {
-        // Create
-        const targetOwnerId = (isAdmin && selectedTeacher) ? selectedTeacher.teacher_id : currentUserId
-        const { error } = await supabase
-          .from('students')
-          .insert({
-            name: studentName,
-            subject: studentSubject,
-            first_meeting_date: studentFirstMeeting || null,
-            meeting_count: studentMeetingCount,
-            user_id: targetOwnerId
-          })
+        if (error) {
+          if (error.code === 'PGRST204') {
+            // Column 'language' not found in schema cache yet -> update without it & save fallback
+            delete payload.language
+            const { error: retryErr } = await supabase
+              .from('students')
+              .update(payload)
+              .eq('id', editingStudent.id)
+            if (retryErr) throw retryErr
+            await saveStudentLanguageFallback(editingStudent.id, studentLanguage, supabase)
+          } else {
+            throw error
+          }
+        } else {
+          // In case column exists, also update fallback map in memory
+          await saveStudentLanguageFallback(editingStudent.id, studentLanguage, supabase)
+        }
 
-        if (error) throw error
-        triggerToast('success', 'Murid baru berhasil ditambahkan.')
+        triggerToast('success', locale === 'id' ? 'Data murid berhasil diperbarui.' : 'Student data successfully updated.')
+      } else {
+        // Create student
+        const targetOwnerId = (isAdmin && selectedTeacher) ? selectedTeacher.teacher_id : currentUserId
+        const payload: any = {
+          name: studentName,
+          subject: studentSubject,
+          first_meeting_date: studentFirstMeeting || null,
+          meeting_count: studentMeetingCount,
+          language: studentLanguage,
+          user_id: targetOwnerId
+        }
+
+        const { data: inserted, error } = await supabase
+          .from('students')
+          .insert(payload)
+          .select()
+          .maybeSingle()
+
+        if (error) {
+          if (error.code === 'PGRST204') {
+            delete payload.language
+            const { data: fallbackInserted, error: retryErr } = await supabase
+              .from('students')
+              .insert(payload)
+              .select()
+              .maybeSingle()
+            if (retryErr) throw retryErr
+            if (fallbackInserted) {
+              await saveStudentLanguageFallback(fallbackInserted.id, studentLanguage, supabase)
+            }
+          } else {
+            throw error
+          }
+        } else if (inserted) {
+          await saveStudentLanguageFallback(inserted.id, studentLanguage, supabase)
+        }
+
+        triggerToast('success', locale === 'id' ? 'Murid baru berhasil ditambahkan.' : 'New student successfully added.')
       }
       setShowStudentModal(false)
       fetchData()
@@ -480,24 +540,36 @@ export default function StudentsPage() {
                     <tr className="border-b border-black/10 text-[10px] font-bold text-neutral-500 uppercase tracking-widest bg-neutral-50 font-mono">
                       <th className="p-4">{t('label_student_name')}</th>
                       <th className="p-4">{t('label_student_subject')}</th>
+                      <th className="p-4">{locale === 'id' ? 'Bahasa Laporan' : 'Language'}</th>
                       <th className="p-4">{locale === 'id' ? 'Tanggal Mulai' : 'Start Date'}</th>
                       <th className="p-4 text-center">{t('label_student_meet_count')}</th>
                       <th className="p-4 text-right">{locale === 'id' ? 'Aksi' : 'Actions'}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-black/5 text-sm text-neutral-700">
-                    {filteredStudents.map((s) => (
-                      <tr key={s.id} className="hover:bg-neutral-50/50 transition-colors duration-350 ease-[cubic-bezier(0.16,1,0.3,1)]">
-                        <td className="p-4 font-bold text-black">{s.name}</td>
-                        <td className="p-4">
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-neutral-100 border border-black/5 text-black text-xs font-semibold rounded-xl font-mono uppercase">
-                            <BookOpen className="w-3.5 h-3.5" />
-                            {s.subject}
-                          </span>
-                        </td>
-                        <td className="p-4 text-neutral-500 font-mono text-xs">{s.first_meeting_date || '-'}</td>
-                        <td className="p-4 text-center font-bold text-black font-mono">{s.meeting_count || 0}</td>
-                        <td className="p-4 text-right space-x-1.5">
+                    {filteredStudents.map((s) => {
+                      const effectiveLang = resolveStudentLanguage(s, languageMap)
+                      return (
+                        <tr key={s.id} className="hover:bg-neutral-50/50 transition-colors duration-350 ease-[cubic-bezier(0.16,1,0.3,1)]">
+                          <td className="p-4 font-bold text-black">{s.name}</td>
+                          <td className="p-4">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-neutral-100 border border-black/5 text-black text-xs font-semibold rounded-xl font-mono uppercase">
+                              <BookOpen className="w-3.5 h-3.5" />
+                              {s.subject}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 border text-xs font-bold rounded-xl font-mono uppercase ${
+                              effectiveLang === 'en'
+                                ? 'bg-neutral-900 text-white border-neutral-900'
+                                : 'bg-neutral-100 text-neutral-800 border-black/10'
+                            }`}>
+                              <span>{effectiveLang === 'en' ? '🇬🇧 English' : '🇮🇩 Indonesia'}</span>
+                            </span>
+                          </td>
+                          <td className="p-4 text-neutral-500 font-mono text-xs">{s.first_meeting_date || '-'}</td>
+                          <td className="p-4 text-center font-bold text-black font-mono">{s.meeting_count || 0}</td>
+                          <td className="p-4 text-right space-x-1.5">
                           {isAdmin && (
                             <button
                               onClick={() => handleOpenTransferModal(s)}
@@ -523,7 +595,7 @@ export default function StudentsPage() {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                 </table>
               </div>
@@ -602,6 +674,45 @@ export default function StudentsPage() {
                     onChange={(e) => setStudentMeetingCount(Number(e.target.value))}
                     className="form-input-premium"
                   />
+                </div>
+              </div>
+
+              {/* Language Selector in Student Modal */}
+              <div>
+                <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5 font-mono flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Languages className="w-3.5 h-3.5 text-neutral-500" />
+                    <span>{locale === 'id' ? 'Bahasa Laporan' : 'Report Language'}</span>
+                  </span>
+                  <span className="text-[10px] text-neutral-400 font-mono">
+                    {locale === 'id' ? 'Auto-bind di buat laporan' : 'Auto-bind on report creation'}
+                  </span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStudentLanguage('id')}
+                    className={`py-2.5 px-3 text-xs font-mono font-bold rounded-xl border transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                      studentLanguage === 'id'
+                        ? 'bg-black text-white border-black shadow-xs scale-[1.01]'
+                        : 'bg-neutral-50 text-neutral-600 border-black/10 hover:border-black/30 hover:bg-neutral-100'
+                    }`}
+                  >
+                    <span>🇮🇩</span>
+                    <span>Bahasa Indonesia (ID)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStudentLanguage('en')}
+                    className={`py-2.5 px-3 text-xs font-mono font-bold rounded-xl border transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                      studentLanguage === 'en'
+                        ? 'bg-black text-white border-black shadow-xs scale-[1.01]'
+                        : 'bg-neutral-50 text-neutral-600 border-black/10 hover:border-black/30 hover:bg-neutral-100'
+                    }`}
+                  >
+                    <span>🇬🇧</span>
+                    <span>English (EN)</span>
+                  </button>
                 </div>
               </div>
 

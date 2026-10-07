@@ -85,6 +85,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: 'Student not found.' }, { status: 404 })
     }
 
+    // Determine target language: request parameter prioritized, with student.language fallback
+    const targetLanguage = (language === 'en' || language === 'id') 
+      ? language 
+      : ((student.language === 'en' || student.language === 'id') ? student.language : 'id')
+
     // 5. Fetch settings
     // Secure retrieval: First priority is server environment variables (AI_API_KEY).
     // If not in env, fetch from app_settings via server-side admin client (bypassing RLS).
@@ -121,10 +126,10 @@ export async function POST(request: NextRequest) {
     const { count, error: countError } = await supabase
       .from('dataset_entries')
       .select('*', { count: 'exact', head: true })
-      .eq('language', language)
+      .eq('language', targetLanguage)
 
     if (countError || count === null || count === 0) {
-      const langName = language === 'en' ? 'Bahasa Inggris' : 'Bahasa Indonesia'
+      const langName = targetLanguage === 'en' ? 'Bahasa Inggris' : 'Bahasa Indonesia'
       return NextResponse.json({
         success: false,
         message: `Silakan tambah minimal 1 contoh di tab Dataset Gaya untuk ${langName} biar AI tahu gaya nulis kamu.`
@@ -151,7 +156,7 @@ export async function POST(request: NextRequest) {
           materi,
           behavior,
           category,
-          language
+          language: targetLanguage
         })
 
         reportSections = await generateReportSections(prompt, activeProvider, activeApiKey, activeModel)
@@ -187,7 +192,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 8. Assemble sections
-    const outputText = assembleReport(student, meeting_number, report_date, reportSections, language, report_type)
+    const outputText = assembleReport(student, meeting_number, report_date, reportSections, targetLanguage, report_type)
 
     // Warning flag if validation parameters were not fully met on final try
     let warning: string | null = null
