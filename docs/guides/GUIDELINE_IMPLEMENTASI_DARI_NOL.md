@@ -79,7 +79,7 @@ Proyek ini telah menyediakan file skema master tunggal yang mencakup seluruh tab
 
 #### Apa yang Dibuat oleh `schema.sql`?
 - **Tabel Inti**:
-  - `students`: Data murid, level, nama wali, nomor WA, dan unique slug.
+  - `students`: Data murid, level, nama wali, nomor WA, preferensi bahasa laporan ('id' / 'en'), dan unique slug.
   - `reports`: Laporan progres belajar, evaluasi materi, sikap, dan URL foto dokumentasi.
   - `schedules` & `schedule_student`: Penjadwalan les dan relasi murid.
   - `feedbacks`: Masukan dari orang tua murid via portal publik.
