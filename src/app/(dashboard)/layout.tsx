@@ -45,6 +45,7 @@ export default function DashboardLayout({
   // Auth & UI States
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [teacherName, setTeacherName] = useState<string>('')
+  const [isAdmin, setIsAdmin] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showLogoutModal, setShowLogoutModal] = useState(false)
@@ -96,6 +97,9 @@ export default function DashboardLayout({
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         setUserEmail(user.email || null)
+        const userIsAdmin = user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin'
+        setIsAdmin(userIsAdmin)
+
         const name = 
           user.user_metadata?.teacher_name || 
           user.user_metadata?.full_name || 
@@ -153,6 +157,7 @@ export default function DashboardLayout({
     { name: t('nav_dataset'), href: '/dataset', icon: BookOpen },
     { name: t('nav_history'), href: '/history', icon: History },
     { name: t('nav_inbox'), href: '/inbox', icon: Inbox },
+    ...(isAdmin ? [{ name: t('nav_instructors') || 'Kelola Instruktur', href: '/instructors', icon: Users }] : []),
     { name: t('nav_settings'), href: '/settings', icon: Settings },
   ]
 

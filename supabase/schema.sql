@@ -110,23 +110,36 @@ CREATE TABLE IF NOT EXISTS public.feedbacks (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 1.9 Tabel INSTRUCTOR_INVITATIONS (Daftar Putih & Token Aktivasi)
+CREATE TABLE IF NOT EXISTS public.instructor_invitations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    name VARCHAR(255),
+    role VARCHAR(50) NOT NULL DEFAULT 'teacher',
+    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    activation_token TEXT,
+    invited_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    invited_at TIMESTAMPTZ DEFAULT now(),
+    activated_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- =====================================================================
 -- 2. HELPER FUNCTIONS & LOGIKA BISNIS
 -- =====================================================================
 
--- 2.1 Fungsi Deteksi Role Admin (Berbasis Metadata Token)
+-- 2.1 Fungsi Deteksi Role Admin (Berbasis app_metadata Token Anti-Tampering)
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
 AS $$
-  SELECT 
-    COALESCE(
-      (auth.jwt() -> 'user_metadata' ->> 'role') = 'admin'
-      OR (auth.jwt() -> 'app_metadata' ->> 'role') = 'admin',
-      false
-    );
+  SELECT COALESCE(
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'admin',
+    false
+  );
 $$;
 
 GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated, anon;

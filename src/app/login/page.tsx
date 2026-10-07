@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { createClient } from '@/utils/supabase/client'
 import Logo from '@/components/Logo'
 import { APP_CONFIG } from '@/lib/branding'
-import { Mail, Lock, Eye, EyeOff, Loader2, Sun, Moon, ArrowRight, Languages } from 'lucide-react'
+import { Mail, Lock, Eye, EyeOff, Loader2, Sun, Moon, ArrowRight, Languages, ShieldCheck, AlertCircle } from 'lucide-react'
 import { useTheme } from '@/components/ThemeProvider'
 import { useTranslation } from '@/components/LocaleProvider'
 import { clearCachedData } from '@/lib/dataCache'
@@ -23,7 +23,6 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(true)
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
-  const [isSignUp, setIsSignUp] = useState(false)
   const [successMsg, setSuccessMsg] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
 
@@ -31,7 +30,14 @@ export default function LoginPage() {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
       const err = params.get('error')
-      if (err === 'auth_callback_failed') {
+      if (err === 'not_whitelisted') {
+        const rejectedEmail = params.get('email')
+        setErrorMsg(
+          rejectedEmail 
+            ? `${t('login_err_not_whitelisted')} (${rejectedEmail})`
+            : t('login_err_not_whitelisted')
+        )
+      } else if (err === 'auth_callback_failed') {
         setErrorMsg(t('login_err_google_auth'))
       }
     }
@@ -69,37 +75,21 @@ export default function LoginPage() {
     setSuccessMsg('')
 
     try {
-      if (isSignUp) {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-        })
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
 
-        if (error) {
-          setErrorMsg(error.message)
-        } else if (data.user) {
-          setSuccessMsg(`${t('login_success_signup_prefix')} ${data.user.email}! ${t('login_success_signup_suffix')}`)
-          setEmail('')
-          setPassword('')
-          setIsSignUp(false)
-        }
+      if (error) {
+        setErrorMsg(
+          error.message === 'Invalid login credentials'
+            ? t('login_err_invalid_creds')
+            : error.message
+        )
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        })
-
-        if (error) {
-          setErrorMsg(
-            error.message === 'Invalid login credentials'
-              ? t('login_err_invalid_creds')
-              : error.message
-          )
-        } else {
-          clearCachedData()
-          router.refresh()
-          router.push('/')
-        }
+        clearCachedData()
+        router.refresh()
+        router.push('/')
       }
     } catch {
       setErrorMsg(t('login_err_connection'))
@@ -200,31 +190,27 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Title and Switcher */}
+          {/* Title & Portal Badge */}
           <div className="mb-6">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-accent text-xs font-mono font-semibold mb-2">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>{t('login_portal_subtitle')}</span>
+            </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-text-primary tracking-tight">
-              {isSignUp ? t('login_title_signup') : t('login_title_signin')}
+              {t('login_title_signin')}
             </h1>
-            <p className="text-xs sm:text-sm text-text-secondary mt-1.5 flex items-center gap-1.5">
-              <span>{isSignUp ? t('login_prompt_has_account') : t('login_prompt_no_account')}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSignUp(!isSignUp)
-                  setErrorMsg('')
-                  setSuccessMsg('')
-                }}
-                className="text-accent hover:underline font-semibold cursor-pointer"
-              >
-                {isSignUp ? t('login_action_signin') : t('login_action_signup')}
-              </button>
+            <p className="text-xs sm:text-sm text-text-secondary mt-1.5 leading-relaxed">
+              {locale === 'id' 
+                ? 'Masuk menggunakan akun pengajar atau administrator yang telah diaktivasi.' 
+                : 'Sign in with your activated instructor or administrator account.'}
             </p>
           </div>
 
           {/* Alert Error Message */}
           {errorMsg && (
-            <div className="bg-red-500/10 border border-red-500/25 text-red-600 dark:text-red-400 text-xs px-4 py-3 rounded-xl mb-5 font-medium leading-relaxed">
-              {errorMsg}
+            <div className="bg-red-500/10 border border-red-500/25 text-red-600 dark:text-red-400 text-xs px-4 py-3 rounded-xl mb-5 font-medium leading-relaxed flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{errorMsg}</span>
             </div>
           )}
 
@@ -339,12 +325,19 @@ export default function LoginPage() {
                 </>
               ) : (
                 <>
-                  <span>{isSignUp ? t('login_btn_signup') : t('login_btn_signin')}</span>
+                  <span>{t('login_btn_signin')}</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
             </button>
           </form>
+
+          {/* Invite-Only Help Notice */}
+          <div className="mt-5 p-3.5 bg-neutral-100 dark:bg-neutral-800/50 border border-border-color/60 rounded-xl text-center">
+            <p className="text-xs text-text-secondary leading-relaxed">
+              {t('login_invite_only_hint')}
+            </p>
+          </div>
 
           {/* Footer note */}
           <div className="mt-6 pt-4 border-t border-border-color/60 text-center">
