@@ -78,7 +78,7 @@ export default function StudentsPage() {
       if (!user) return
 
       setUserId(user.id)
-      const userIsAdmin = user.user_metadata?.role === 'admin' || user.app_metadata?.role === 'admin'
+      const userIsAdmin = user.app_metadata?.role === 'admin'
       setIsAdmin(userIsAdmin)
 
       // 1. Fetch Students

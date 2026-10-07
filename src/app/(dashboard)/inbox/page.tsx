@@ -35,7 +35,7 @@ export default function InboxPage() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        const isAdmin = user.user_metadata?.role === 'admin' || user.app_metadata?.role === 'admin'
+        const isAdmin = user.app_metadata?.role === 'admin'
 
         let query = supabase
           .from('feedbacks')

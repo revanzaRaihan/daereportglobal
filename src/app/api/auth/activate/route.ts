@@ -22,13 +22,65 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Kata sandi baru minimal 6 karakter.' }, { status: 400 })
     }
 
-    // 1. Check if user is authenticated from current session
+    // 1. Check if user is authenticated from current session (magic link / invite session)
     let { data: { user } } = await supabase.auth.getUser()
 
-    // 2. If not in session, find user by email
+    // 2. If not in active session, find user by email with strict pending-invite verification
+    let pendingInviteRole: 'admin' | 'teacher' = 'teacher'
     if (!user && email) {
+      const cleanEmail = email.trim().toLowerCase()
+
+      // Verify email is in instructor_invitations with pending status
+      let isPending = false
+      try {
+        const { data: invData } = await adminClient
+          .from('instructor_invitations')
+          .select('*')
+          .eq('email', cleanEmail)
+          .maybeSingle()
+        if (invData && invData.status === 'pending') {
+          isPending = true
+          pendingInviteRole = invData.role === 'admin' ? 'admin' : 'teacher'
+        }
+      } catch {
+        // Fallback check
+      }
+
+      if (!isPending) {
+        try {
+          const { data: fallbackSetting } = await adminClient
+            .from('app_settings')
+            .select('value')
+            .eq('key', 'instructor_whitelist')
+            .maybeSingle()
+          if (fallbackSetting?.value) {
+            const list = JSON.parse(fallbackSetting.value)
+            const matched = list.find((i: any) => i.email.toLowerCase() === cleanEmail)
+            if (matched) {
+              isPending = true
+              pendingInviteRole = matched.role === 'admin' ? 'admin' : 'teacher'
+            }
+          }
+        } catch {
+          // Ignore
+        }
+      }
+
+      if (!isPending) {
+        return NextResponse.json({
+          error: 'Email ini tidak memiliki undangan aktivasi yang aktif atau akun sudah pernah diaktifkan sebelumnya.'
+        }, { status: 403 })
+      }
+
       const { data: usersData } = await adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 })
-      user = usersData?.users?.find(u => u.email?.toLowerCase() === email.trim().toLowerCase()) || null
+      user = usersData?.users?.find(u => u.email?.toLowerCase() === cleanEmail) || null
+
+      // Guard: If account has already completed sign-in in the past, reject unauthenticated reactivation
+      if (user && user.last_sign_in_at) {
+        return NextResponse.json({
+          error: 'Akun ini sudah aktif. Silakan masuk menggunakan kata sandi Anda di halaman login.'
+        }, { status: 400 })
+      }
     }
 
     if (!user) {
@@ -38,15 +90,21 @@ export async function POST(request: Request) {
     }
 
     const trimmedUsername = username.trim()
+    const targetRole = pendingInviteRole || user.app_metadata?.role || 'teacher'
 
-    // 3. Update password and teacher metadata
+    // 3. Update password, teacher metadata, and secure app_metadata.role
     const { error: updateError } = await adminClient.auth.admin.updateUserById(user.id, {
       password: password,
       user_metadata: {
         ...(user.user_metadata || {}),
         teacher_name: trimmedUsername,
         full_name: trimmedUsername,
-        name: trimmedUsername
+        name: trimmedUsername,
+        role: targetRole
+      },
+      app_metadata: {
+        ...(user.app_metadata || {}),
+        role: targetRole
       },
       email_confirm: true
     })

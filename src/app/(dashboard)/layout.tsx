@@ -97,7 +97,7 @@ export default function DashboardLayout({
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         setUserEmail(user.email || null)
-        const userIsAdmin = user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin'
+        const userIsAdmin = user.app_metadata?.role === 'admin'
         setIsAdmin(userIsAdmin)
 
         const name = 

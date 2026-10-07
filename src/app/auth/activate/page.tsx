@@ -80,9 +80,7 @@ function ActivateContent() {
         } else {
           // If no invited_email query param is in URL:
           if (user && user.email) {
-            const isAdmin = 
-              user.app_metadata?.role === 'admin' || 
-              user.user_metadata?.role === 'admin'
+            const isAdmin = user.app_metadata?.role === 'admin'
 
             if (isAdmin) {
               // The browser is currently logged in as an active Admin

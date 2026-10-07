@@ -111,25 +111,27 @@ Buka browser pada [http://localhost:3000](http://localhost:3000).
 
 ## 4. Cara Membuat Akun Administrator Pertama
 
-Untuk mengaktifkan fitur khusus Super Admin (rekap performa seluruh guru, transfer murid, dan konfigurasi API key sistem):
+Karena pendaftaran publik mandiri telah ditutup demi keamanan kuota AI dan privasi murid, akun administrator pertama dibuat secara langsung:
 
-1. Daftar akun baru secara normal melalui halaman `/login` (mode Sign Up) di aplikasi Anda.
-2. Buka **Supabase Dashboard** -> **Authentication** -> **Users**.
-3. Cari akun email yang baru Anda daftarkan, klik menu titik tiga (...) -> **Edit user metadata**.
-4. Tambahkan properti role:
-   ```json
-   {
-     "role": "admin"
-   }
+1. Buka **Supabase Dashboard** -> **Authentication** -> **Users** -> **Add User** -> **Create User**.
+2. Masukkan email admin Anda (misal `admin@lembaga.com`) dan buat password.
+3. Buka **SQL Editor** pada Supabase Dashboard dan jalankan:
+   ```sql
+   UPDATE auth.users
+   SET raw_app_meta_data = raw_app_meta_data || '{"role": "admin"}'::jsonb
+   WHERE email = 'admin@lembaga.com';
    ```
-5. Simpan perubahan. Akun Anda kini resmi memiliki status **Super Admin** dengan hak akses penuh ke menu Admin di halaman Murid, Riwayat, dan Pengaturan.
+4. Login di `/login` dengan akun tersebut. Akun Anda kini resmi memiliki status **Super Admin** terlindungi (*anti-tampering*).
+5. Untuk menambah staf/guru pengajar lainnya, gunakan menu **Instruktur (`/instructors`)** untuk mengirimkan tautan aktivasi mandiri.
 
 ---
 
-## 5. Kustomisasi Brand (White-Labeling)
+## 5. Dokumentasi & Panduan Lanjutan
 
-Untuk mengganti logo, judul aplikasi, dan konfigurasi merek lembaga Anda, silakan ikuti petunjuk lengkap di:
-- [Panduan White-Labeling (`docs/WHITE_LABEL_GUIDE.md`)](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/docs/WHITE_LABEL_GUIDE.md)
+Pelajari panduan spesifik dan mendalam lainnya yang tersedia di repositori ini:
+- 🚀 **[Panduan Lengkap Implementasi dari Nol (`docs/specifics/GUIDELINE_IMPLEMENTASI_DARI_NOL.md`)](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/docs/specifics/GUIDELINE_IMPLEMENTASI_DARI_NOL.md)**
+- 🎨 **[Panduan Kustomisasi Brand & White-Labeling (`docs/WHITE_LABEL_GUIDE.md`)](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/docs/WHITE_LABEL_GUIDE.md)**
+- 🛡️ **[Laporan Audit Keamanan & Alur Kerja (`docs/AUDIT_WORKFLOW_DAN_KEAMANAN_SISTEM.md`)](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/docs/AUDIT_WORKFLOW_DAN_KEAMANAN_SISTEM.md)**
 
 ---
 

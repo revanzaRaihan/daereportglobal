@@ -62,14 +62,6 @@ next-env.d.ts
 *.dump
 *.sql.bak
 
-# internal audit, developer review, and planning markdown files
-/docs/AUDIT_*.md
-/docs/RENEWAL_*.md
-/docs/*_AUDIT*.md
-/docs/*_REVIEW*.md
-/docs/PRIORITY_*.md
-/docs/WATCHLIST*.md
-/docs/internal/
-*codebase_review*
+# internal developer temporary review and scratch files
 *.scratch.*
 /scratch/

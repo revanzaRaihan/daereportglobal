@@ -74,7 +74,7 @@ export default function InstructorsPage() {
       }
 
       setCurrentUserId(user.id)
-      const userIsAdmin = user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin'
+      const userIsAdmin = user.app_metadata?.role === 'admin'
       setIsAdmin(userIsAdmin)
 
       if (!userIsAdmin) {
