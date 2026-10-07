@@ -215,7 +215,7 @@ export default function HistoryPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         setUserId(user.id)
-        const userIsAdmin = user.user_metadata?.role === 'admin' || user.app_metadata?.role === 'admin'
+        const userIsAdmin = user.app_metadata?.role === 'admin'
         setIsAdmin(userIsAdmin)
 
         if (userIsAdmin) {

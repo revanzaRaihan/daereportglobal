@@ -115,6 +115,13 @@ export default function ParentDashboard({ student, reports }: ParentDashboardPro
     e.preventDefault()
     if (!feedbackText.trim()) return
 
+    // Cooldown rate limit guard (30 seconds per student)
+    const lastSent = typeof window !== 'undefined' ? localStorage.getItem(`feedback_sent_${student.id}`) : null
+    if (lastSent && Date.now() - Number(lastSent) < 30000) {
+      alert('Mohon tunggu sejenak sebelum mengirim masukan berikutnya (jeda 30 detik).')
+      return
+    }
+
     setSendingFeedback(true)
     setFeedbackStatus('idle')
 
@@ -126,11 +133,15 @@ export default function ParentDashboard({ student, reports }: ParentDashboardPro
           student_id: student.id,
           student_name: student.name,
           subject: student.subject,
-          feedback: feedbackText,
+          feedback: feedbackText.trim(),
           user_id: student.user_id
         })
 
       if (supabaseError) throw supabaseError
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`feedback_sent_${student.id}`, String(Date.now()))
+      }
 
       const branchAdminEmail = process.env.NEXT_PUBLIC_BRANCH_ADMIN_EMAIL || 'admin@school.com'
       await fetch(`https://formsubmit.co/ajax/${branchAdminEmail}`, {

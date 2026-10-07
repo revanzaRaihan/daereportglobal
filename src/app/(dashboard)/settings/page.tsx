@@ -70,7 +70,7 @@ export default function SettingsPage() {
       if (user) {
         setCurrentUserId(user.id)
         setUserEmail(user.email || '')
-        setIsAdmin(user.user_metadata?.role === 'admin' || user.app_metadata?.role === 'admin')
+        setIsAdmin(user.app_metadata?.role === 'admin')
       }
 
       // 2. Fetch system stats

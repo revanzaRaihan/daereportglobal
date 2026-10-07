@@ -38,10 +38,7 @@ export interface InstructorOverviewResult {
  */
 export function isUserAdmin(user: User | null | undefined): boolean {
   if (!user) return false
-  return (
-    user.app_metadata?.role === 'admin' ||
-    user.user_metadata?.role === 'admin'
-  )
+  return user.app_metadata?.role === 'admin'
 }
 
 /**
@@ -117,11 +114,8 @@ export async function isEmailWhitelisted(email: string): Promise<boolean> {
     )
 
     if (matchedUser) {
-      // Allow if admin
-      if (
-        matchedUser.app_metadata?.role === 'admin' ||
-        matchedUser.user_metadata?.role === 'admin'
-      ) {
+      // Allow if admin (strictly app_metadata)
+      if (matchedUser.app_metadata?.role === 'admin') {
         return true
       }
 
@@ -230,9 +224,7 @@ export async function getInstructorsOverview(): Promise<InstructorOverviewResult
 
     const email = user.email || ''
     const role: 'admin' | 'teacher' =
-      user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin'
-        ? 'admin'
-        : 'teacher'
+      user.app_metadata?.role === 'admin' ? 'admin' : 'teacher'
 
     const name =
       customNamesMap.get(user.id) ||
@@ -348,6 +340,18 @@ export async function inviteInstructor(params: {
     role,
     invitedAt: new Date().toISOString(),
     actionLink
+  }
+
+  // Ensure app_metadata has role set on the user immediately
+  const targetUserId = linkRes.data?.user?.id || existingUser?.id
+  if (targetUserId) {
+    try {
+      await adminClient.auth.admin.updateUserById(targetUserId, {
+        app_metadata: { role }
+      })
+    } catch (err) {
+      console.warn('Failed to set app_metadata on invited user:', err)
+    }
   }
 
   // 3. Persist to instructor_invitations table or fallback
