@@ -38,7 +38,12 @@ export default function LoginPage() {
             : t('login_err_not_whitelisted')
         )
       } else if (err === 'auth_callback_failed') {
-        setErrorMsg(t('login_err_google_auth'))
+        const details = params.get('details')
+        if (details) {
+          setErrorMsg(`${t('login_err_google_auth')} (${details})`)
+        } else {
+          setErrorMsg(t('login_err_google_auth'))
+        }
       }
     }
   }, [t])
