@@ -379,6 +379,24 @@ export default function HistoryPage() {
           .update({ meeting_count: reportsCount || 0 })
           .eq('id', studentId)
 
+        fetch('/api/admin/audit-logs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'delete_report',
+            entityType: 'report',
+            entityId: id,
+            description: `Menghapus laporan riwayat murid ${reportToDelete?.student_name || studentId} (Pertemuan ${reportToDelete?.meeting_number || '-'})`,
+            details: {
+              reportId: id,
+              studentId,
+              studentName: reportToDelete?.student_name,
+              meetingNumber: reportToDelete?.meeting_number,
+              topic: reportToDelete?.topic
+            }
+          })
+        }).catch(console.error)
+
         triggerToast('success', locale === 'id' ? 'Laporan berhasil dihapus.' : 'Report deleted successfully.')
         const activeTargetId = isAdmin ? selectedTeacher?.teacher_id : userId
         if (activeTargetId) {

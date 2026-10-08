@@ -6,12 +6,12 @@ Panduan ini disusun secara komprehensif untuk pengembang (**developer**) maupun 
 
 ## 1. Ikhtisar Arsitektur Sistem
 
-Daely Report Studio mengusung arsitektur modern berbasis **Next.js 16 (App Router)** dan **Supabase Platform**:
+Daely Report Studio mengusung arsitektur modern berbasis **Next.js 16 (App Router & `proxy.ts`)** dan **Supabase Platform**:
 
 ```
                                ┌───────────────────────────────────────────────┐
                                │           Daely Report Studio                 │
-                               │          (Next.js 16 App Router)             │
+                               │          (Next.js 16 App Router)              │
                                └───────┬───────────────────────────────┬───────┘
                                        │                               │
                        ┌───────────────▼──────────────┐ ┌──────────────▼──────────────┐
@@ -24,11 +24,12 @@ Daely Report Studio mengusung arsitektur modern berbasis **Next.js 16 (App Route
      [Admin Lembaga]           [Guru / Instruktur]        [Portal Orang Tua]
    • Whitelist Staf           • Data Murid Sendiri       • Tautan /p/[slug]
    • Konfigurasi AI           • Buat Draf Evaluasi       • Baca Riwayat Belajar
-   • Transfer Murid           • Kotak Masuk Feedback     • Kirim Masukan (Cooldown)
+   • Safe Deoffboarding       • Kotak Masuk Feedback     • Kirim Masukan (Cooldown)
+   • Jejak Audit (Logs)       • Dikte Suara Observasi    • Unduh / Cetak Laporan
 ```
 
-### Karakteristik Keamanan Utama
-1. **Otentikasi Berbasis Whitelist (Arsitektur Opsi 2)**:
+### Karakteristik Keamanan & Keandalan Utama
+1. **Otentikasi Berbasis Whitelist & Aktivasi Mandiri**:
    - Registrasi publik mandiri ditutup untuk mencegah pengguna luar menguras kuota token AI lembaga.
    - Admin mengundang instruktur melalui portal internal.
    - Instruktur melakukan aktivasi mandiri membuat username & kata sandi melalui tautan token khusus.
@@ -39,14 +40,21 @@ Daely Report Studio mengusung arsitektur modern berbasis **Next.js 16 (App Route
 3. **Isolasi Murid (Multi-Tenant Row Level Security)**:
    - Guru hanya dapat melihat, mengedit, dan menghapus murid yang menjadi bimbingannya sendiri (`user_id = auth.uid()`).
    - Admin memiliki akses supervisi global dan dapat mentransfer murid antar-guru.
+4. **Alur Proteksi Deoffboarding Aman (*Safe Deoffboarding Workflow*)**:
+   - Mencegah data murid menjadi yatim (*orphan*) saat instruktur dinonaktifkan.
+   - Jika guru masih mengampu murid aktif, sistem mewajibkan pengalihan seluruh murid ke guru pengganti sebelum akun dihapus.
+5. **Jejak Audit Operasional (*Audit Logs Trail*)**:
+   - Seluruh mutasi kritis (transfer murid, update AI key, undangan guru, hapus laporan) tercatat dalam tabel append-only `public.audit_logs` yang hanya dapat dibaca oleh Admin.
+6. **Konvensi Modern Next.js 16 (`proxy.ts`)**:
+   - Menggunakan standar terbaru `src/proxy.ts` sebagai pengganti `middleware.ts` lama untuk efisiensi proteksi rute dan sesi Supabase.
 
 ---
 
 ## 2. Prasyarat Sistem (Prerequisites)
 
 Pastikan lingkungan lokal atau server Anda memiliki:
-1. **Node.js**: Versi `18.18.0` atau `20.x` LTS ke atas.
-2. **Package Manager**: `npm` (bawaan Node.js) atau `pnpm` / `yarn`.
+1. **Node.js**: Versi `20.x` LTS ke atas.
+2. **Package Manager**: `npm` (bawaan Node.js), `pnpm`, atau `yarn`.
 3. **Git**: Untuk clone repositori dan version control.
 4. **Akun Supabase**: Daftar gratis di [supabase.com](https://supabase.com).
 5. **API Key Google Gemini**: Dapatkan gratis di [Google AI Studio](https://aistudio.google.com).
@@ -76,6 +84,7 @@ Proyek ini telah menyediakan file skema master tunggal yang mencakup seluruh tab
 2. Klik **"New Query"**.
 3. Buka file [`supabase/schema.sql`](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/supabase/schema.sql) dari repositori proyek ini, salin seluruh isinya, dan tempelkan ke SQL Editor Supabase.
 4. Klik tombol **"RUN"** (atau tekan `Ctrl + Enter`).
+5. Jalankan juga skrip migrasi terbaru di [`supabase/migrations/`](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/supabase/migrations/) (seperti `20261008_create_audit_logs_activity_trail.sql`).
 
 #### Apa yang Dibuat oleh `schema.sql`?
 - **Tabel Inti**:
@@ -86,11 +95,13 @@ Proyek ini telah menyediakan file skema master tunggal yang mencakup seluruh tab
   - `dataset_entries` & `recommendation_datasets`: Koleksi gaya bahasa AI dan rekomendasi materi.
   - `app_settings`: Kredensial AI terenkripsi, nomor WA cabang, dan whitelist undangan.
   - `instructor_invitations`: Catatan token undangan aktivasi instruktur baru.
+  - `audit_logs`: Catatan jejak audit aktivitas administratif studio.
 - **Storage Bucket**:
   - Bucket `reports` untuk menyimpan foto dokumentasi belajar murid dengan RLS terproteksi.
 - **Fungsi Trigger Otomatis**:
-  - `generate_student_slug()`: Membuat slug unik otomatis ramah URL saat murid baru didaftarkan. Diberi hak `SECURITY DEFINER` agar tidak terbentur isolasi RLS guru.
+  - `generate_student_slug()`: Membuat slug unik otomatis ramah URL saat murid baru didaftarkan.
   - `public.is_admin()`: Memeriksa hak admin secara aman murni melalui `app_metadata`.
+  - `public.transfer_student()`: Memindahkan murid, riwayat laporan, dan feedback secara atomik.
 
 ---
 
@@ -135,9 +146,6 @@ SET raw_app_meta_data = raw_app_meta_data || '{"role": "admin"}'::jsonb
 WHERE email = 'admin@lembaga.com';
 ```
 
-> **Mengapa cara ini aman?**  
-> `raw_app_meta_data` hanya bisa diubah oleh admin via SQL Editor atau Service Role Key. Browser/client tidak memiliki izin untuk mengedit bagian ini, sehingga hak admin terlindung 100%.
-
 ---
 
 ### Langkah 5: Konfigurasi Environment Variables Proyek
@@ -163,7 +171,9 @@ NEXT_PUBLIC_APP_NAME="Daely Report Studio"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 
 # Kunci AI Gemini (Opsional jika ingin diisi via file, atau isi via menu Pengaturan di web)
-GEMINI_API_KEY="AIzaSy..."
+AI_PROVIDER="gemini"
+AI_MODEL="gemini-2.5-flash"
+AI_API_KEY="AIzaSy..."
 ```
 
 ---
@@ -194,12 +204,12 @@ Setelah aplikasi berjalan, lakukan pengujian alur kerja berikut:
 ### 2. Konfigurasi Kunci AI di Menu Pengaturan
 - Klik menu **Pengaturan** (`/settings`).
 - Masukkan **Google Gemini API Key** dan nomor WhatsApp lembaga.
-- Klik **Simpan Pengaturan**.
+- Klik **Simpan Pengaturan** (Aktivitas ini otomatis dicatat di Jejak Audit).
 
 ### 3. Mengundang Guru / Instruktur Baru
 - Klik menu **Instruktur** (`/instructors`) di sidebar. *(Menu ini hanya muncul untuk akun ber-role admin).*
 - Klik tombol **"+ Undang Instruktur"**.
-- Masukkan Nama Pengajar dan Email (misal: `budi@gmail.com`), pilih peran `Instructor`, lalu klik **Kirim Undangan**.
+- Masukkan Nama Pengajar dan Email (misal: `guru@gmail.com`), pilih peran `Instructor`, lalu klik **Kirim Undangan**.
 - Sistem akan menampilkan popup tautan aktivasi mandiri:
   `http://localhost:3000/auth/activate?token=xxxxxxxxxxxx`
 - Salin tautan tersebut.
@@ -229,9 +239,9 @@ Setelah aplikasi berjalan, lakukan pengujian alur kerja berikut:
 - Coba kirim masukan di kolom **Feedback Wali Murid**.
 - Coba kirim ulang pesan dalam 30 detik: sistem akan memicu *cooldown rate limit* untuk mencegah spam.
 
-### 7. Memeriksa Masukan di Inbox Guru
-- Kembali ke dashboard guru, klik menu **Inbox** (`/inbox`).
-- Pesan dari wali murid akan tampil seketika beserta tombol balas WhatsApp langsung.
+### 7. Memeriksa Jejak Audit (Audit Trail)
+- Kembali ke akun admin, buka menu **Instruktur** (`/instructors`) -> klik tab **Jejak Audit**.
+- Seluruh riwayat mutasi (undangan pengajar, pengaturan AI, pengalihan murid) akan tampil secara terurut dan transparan.
 
 ---
 
@@ -265,7 +275,7 @@ Setelah aplikasi berjalan, lakukan pengujian alur kerja berikut:
 
 #### Q: Muncul error "Missing SUPABASE_SERVICE_ROLE_KEY"?
 > **Penyebab**: Variabel lingkungan server belum diatur di `.env.local` atau Vercel.  
-> **Solusi**: Salin kunci `service_role` (secret) dari Project Settings API Supabase ke `.env.local`. Jangan lupa restart terminal dev server (`npm run dev`).
+> **Solusi**: Salin kunci `service_role` (secret) dari Project Settings API Supabase ke `.env.local`. Jangan lupa restart dev server (`npm run dev`).
 
 #### Q: Foto laporan yang diunggah guru tidak muncul di portal orang tua?
 > **Penyebab**: Kebijakan RLS storage Supabase belum mengizinkan `public select`.  
@@ -274,21 +284,3 @@ Setelah aplikasi berjalan, lakukan pengujian alur kerja berikut:
 > CREATE POLICY "Allow public select on reports"
 > ON storage.objects FOR SELECT USING (bucket_id = 'reports');
 > ```
-
----
-
-## 7. Struktur Berkas Penting untuk Dipelajari
-
-Untuk Anda yang ingin mempelajari atau memodifikasi kode:
-
-| Lokasi Berkas | Kegunaan & Alur Logika |
-| :--- | :--- |
-| [`src/app/login/page.tsx`](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/src/app/login/page.tsx) | Halaman masuk khusus staf dengan proteksi brute-force visual. |
-| [`src/app/auth/callback/route.ts`](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/src/app/auth/callback/route.ts) | Callback Google OAuth + auto-purge akun yang tidak ada di whitelist. |
-| [`src/app/auth/activate/page.tsx`](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/src/app/auth/activate/page.tsx) | Formulir pembuatan username & kata sandi mandiri oleh guru baru. |
-| [`src/app/api/auth/activate/route.ts`](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/src/app/api/auth/activate/route.ts) | Endpoint backend aman penetapan password dan role `app_metadata`. |
-| [`src/app/(dashboard)/instructors/page.tsx`](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/src/app/(dashboard)/instructors/page.tsx) | Manajemen staf, undangan whitelist, dan status instruktur (Table View). |
-| [`src/app/(dashboard)/settings/page.tsx`](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/src/app/(dashboard)/settings/page.tsx) | Pengaturan kredensial AI dan konfigurasi operasional lembaga. |
-| [`src/lib/instructorAuth.ts`](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/src/lib/instructorAuth.ts) | Helper fungsi keamanan peran admin, pembuatan token undangan, dan whitelist. |
-| [`src/app/p/[slug]/ParentDashboard.tsx`](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/src/app/p/[slug]/ParentDashboard.tsx) | Portal laporan individual murid untuk orang tua + rate limiting feedback. |
-| [`supabase/schema.sql`](file:///c:/Users/user/.gemini/antigravity/scratch/dreport-studio-next/supabase/schema.sql) | Master skema database PostgreSQL, RLS, storage, dan trigger fungsi Supabase. |

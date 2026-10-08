@@ -17,7 +17,7 @@ Seluruh nama aplikasi diatur secara terpusat melalui environment variable dan mo
 3. Nama ini otomatis diterapkan pada:
    - Header dan Sidebar Dashboard Guru & Admin
    - Judul Tab Browser (HTML Title Tag & OpenGraph Metadata)
-   - Layar Login dan Pendaftaran
+   - Layar Login dan Aktivasi Akun
    - Subjek email notifikasi masukan dari orang tua
    - Footer hak cipta di portal publik orang tua (`/p/[slug]`)
 
@@ -70,4 +70,4 @@ Sistem mendukung fleksibilitas pemilihan provider AI:
    AI_API_KEY=gsk_...
    ```
 
-*Catatan: Admin juga dapat mengupdate API key secara dinamis melalui menu Pengaturan di dalam dashboard aplikasi tanpa perlu redeploy kode.*
+*Catatan: Admin juga dapat memperbarui model dan API key secara langsung melalui menu Pengaturan di dalam dashboard aplikasi tanpa perlu melakukan redeploy kode. Setiap pembaruan konfigurasi AI otomatis tercatat dalam Jejak Audit.*

@@ -148,9 +148,27 @@ export default function StudentsPage() {
       if (error) throw error
 
       const newTeacher = teachersOverview.find(t => t.teacher_id === targetTeacherId) || allTeachers.find(t => t.teacher_id === targetTeacherId)
+
+      fetch('/api/admin/audit-logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'transfer_student',
+          entityType: 'student',
+          entityId: transferModalStudent.id,
+          description: `Memindahkan murid ${transferModalStudent.name} ke ${newTeacher?.name || 'guru baru'}`,
+          details: {
+            studentId: transferModalStudent.id,
+            studentName: transferModalStudent.name,
+            targetTeacherId,
+            targetTeacherName: newTeacher?.name
+          }
+        })
+      }).catch(console.error)
+
       triggerToast('success', locale === 'id' 
-        ? `Murid ${transferModalStudent.name} dan riwayat laporannya berhasil dipindahkan ke ${newTeacher?.name || 'guru baru'}.`
-        : `Student ${transferModalStudent.name} and reports successfully transferred to ${newTeacher?.name || 'new teacher'}.`
+        ? `Murid ${transferModalStudent.name}, riwayat laporan, dan masukan orang tua berhasil dipindahkan ke ${newTeacher?.name || 'guru baru'}.`
+        : `Student ${transferModalStudent.name}, reports, and parent feedbacks successfully transferred to ${newTeacher?.name || 'new teacher'}.`
       )
       setTransferModalStudent(null)
       setTargetTeacherId('')

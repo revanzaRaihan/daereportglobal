@@ -101,21 +101,34 @@ function parseReportContent(content: string, materi: string) {
 }
 
 async function getStudentAndReports(slug: string) {
+  if (!slug || typeof slug !== 'string') return null
+  const cleanSlug = slug.trim().toLowerCase()
+  if (!cleanSlug) return null
+
   const supabase = createAdminClient() || (await createClient())
 
-  // 1. Fetch targeted student directly by slug (specific columns only to prevent data leakage)
+  // 1. Fetch targeted student directly by slug (O(1) Indexed Lookup)
   let { data: student, error: studentError } = await supabase
     .from('students')
     .select('id, name, subject, meeting_count, user_id, slug')
-    .eq('slug', slug)
+    .eq('slug', cleanSlug)
     .maybeSingle()
 
-  // Graceful fallback: match by slug or slugified name if direct slug match is not found
+  // 2. Targeted fallback: query at most 1 student by candidate name (O(1) memory & bandwidth)
   if (!student) {
-    const { data: fallbackStudents } = await supabase
-      .from('students')
-      .select('id, name, subject, meeting_count, user_id, slug')
-    student = fallbackStudents?.find(s => (s.slug === slug || slugify(s.name) === slug)) || null
+    const candidateName = cleanSlug.replace(/-/g, ' ').trim()
+    if (candidateName.length >= 2) {
+      const { data: fallbackStudent } = await supabase
+        .from('students')
+        .select('id, name, subject, meeting_count, user_id, slug')
+        .ilike('name', candidateName)
+        .limit(1)
+        .maybeSingle()
+
+      if (fallbackStudent && (fallbackStudent.slug === cleanSlug || slugify(fallbackStudent.name) === cleanSlug)) {
+        student = fallbackStudent
+      }
+    }
   }
 
   if (studentError || !student) {

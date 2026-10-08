@@ -126,41 +126,27 @@ export default function ParentDashboard({ student, reports }: ParentDashboardPro
     setFeedbackStatus('idle')
 
     try {
-      const supabase = createClient()
-      const { error: supabaseError } = await supabase
-        .from('feedbacks')
-        .insert({
+      const res = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           student_id: student.id,
-          student_name: student.name,
-          subject: student.subject,
-          feedback: feedbackText.trim(),
-          user_id: student.user_id
+          feedback: feedbackText.trim()
         })
+      })
 
-      if (supabaseError) throw supabaseError
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Gagal mengirimkan masukan.')
+      }
 
       if (typeof window !== 'undefined') {
         localStorage.setItem(`feedback_sent_${student.id}`, String(Date.now()))
       }
 
-      const branchAdminEmail = process.env.NEXT_PUBLIC_BRANCH_ADMIN_EMAIL || 'admin@school.com'
-      await fetch(`https://formsubmit.co/ajax/${branchAdminEmail}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          student_name: student.name,
-          subject: student.subject,
-          feedback: feedbackText,
-          _subject: `[${APP_CONFIG.name}] Masukan Orang Tua - ${student.name}`
-        })
-      })
-
       setFeedbackStatus('success')
       setFeedbackText('')
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to submit feedback:', err)
       setFeedbackStatus('error')
     } finally {

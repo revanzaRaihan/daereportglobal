@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { username, password, email } = body
+    const { username, password, email, token } = body
 
     if (!username || typeof username !== 'string' || username.trim().length < 2) {
       return NextResponse.json({ error: 'Nama/Username pengajar harus minimal 2 karakter.' }, { status: 400 })
@@ -25,13 +25,31 @@ export async function POST(request: Request) {
     // 1. Check if user is authenticated from current session (magic link / invite session)
     let { data: { user } } = await supabase.auth.getUser()
 
-    // 2. If not in active session, find user by email with strict pending-invite verification
+    if (user && email) {
+      const cleanEmail = email.trim().toLowerCase()
+      if (user.email && user.email.toLowerCase() !== cleanEmail) {
+        return NextResponse.json({
+          error: 'Sesi yang aktif tidak cocok dengan email aktivasi yang diminta.'
+        }, { status: 403 })
+      }
+    }
+
+    // 2. If not in active session, find user by email with strict token & pending-invite verification
     let pendingInviteRole: 'admin' | 'teacher' = 'teacher'
     if (!user && email) {
       const cleanEmail = email.trim().toLowerCase()
+      const cleanToken = typeof token === 'string' ? token.trim() : ''
+
+      if (!cleanToken) {
+        return NextResponse.json({
+          error: 'Token aktivasi wajib disertakan untuk mengaktifkan akun tanpa sesi login aktif. Silakan gunakan tautan aktivasi resmi yang dikirimkan.'
+        }, { status: 401 })
+      }
 
       // Verify email is in instructor_invitations with pending status
       let isPending = false
+      let expectedToken: string | null = null
+
       try {
         const { data: invData } = await adminClient
           .from('instructor_invitations')
@@ -41,6 +59,7 @@ export async function POST(request: Request) {
         if (invData && invData.status === 'pending') {
           isPending = true
           pendingInviteRole = invData.role === 'admin' ? 'admin' : 'teacher'
+          expectedToken = invData.activation_token || null
         }
       } catch {
         // Fallback check
@@ -59,6 +78,7 @@ export async function POST(request: Request) {
             if (matched) {
               isPending = true
               pendingInviteRole = matched.role === 'admin' ? 'admin' : 'teacher'
+              expectedToken = matched.actionLink || null
             }
           }
         } catch {
@@ -70,6 +90,17 @@ export async function POST(request: Request) {
         return NextResponse.json({
           error: 'Email ini tidak memiliki undangan aktivasi yang aktif atau akun sudah pernah diaktifkan sebelumnya.'
         }, { status: 403 })
+      }
+
+      // Strict Token Verification: prevent unauthorized account claiming
+      const isTokenValid = 
+        Boolean(expectedToken) && 
+        (cleanToken === expectedToken || expectedToken!.includes(cleanToken) || cleanToken.includes(expectedToken!))
+
+      if (!isTokenValid) {
+        return NextResponse.json({
+          error: 'Token aktivasi tidak valid atau telah kedaluwarsa. Harap minta administrator mengirim ulang undangan.'
+        }, { status: 401 })
       }
 
       const { data: usersData } = await adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 })

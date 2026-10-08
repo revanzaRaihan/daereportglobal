@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS public.students (
     first_meeting_date DATE,
     slug TEXT,
     language VARCHAR(10) NOT NULL DEFAULT 'id',
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE RESTRICT,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     deleted_at TIMESTAMPTZ
@@ -200,6 +200,10 @@ SET search_path = public, auth
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    IF NOT public.is_admin() THEN
+        RAISE EXCEPTION 'Akses ditolak: Hanya administrator yang berhak mengakses data rekapitulasi guru.';
+    END IF;
+
     RETURN QUERY
     SELECT 
         u.id AS teacher_id,
@@ -219,6 +223,7 @@ BEGIN
 END;
 $$;
 
+REVOKE EXECUTE ON FUNCTION public.get_teachers_overview() FROM anon;
 GRANT EXECUTE ON FUNCTION public.get_teachers_overview() TO authenticated;
 
 -- 2.4 Fungsi Daftar Seluruh Guru (Dropdown Transfer Murid)
@@ -233,6 +238,10 @@ SET search_path = public, auth
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    IF NOT public.is_admin() THEN
+        RAISE EXCEPTION 'Akses ditolak: Hanya administrator yang berhak mengakses daftar guru.';
+    END IF;
+
     RETURN QUERY
     SELECT 
         u.id AS teacher_id,
@@ -248,6 +257,7 @@ BEGIN
 END;
 $$;
 
+REVOKE EXECUTE ON FUNCTION public.get_all_teachers() FROM anon;
 GRANT EXECUTE ON FUNCTION public.get_all_teachers() TO authenticated;
 
 -- 2.5 Fungsi Rekap Riwayat Sesi Guru (History Overview)
@@ -264,6 +274,10 @@ SET search_path = public, auth
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    IF NOT public.is_admin() THEN
+        RAISE EXCEPTION 'Akses ditolak: Hanya administrator yang berhak mengakses rekap riwayat guru.';
+    END IF;
+
     RETURN QUERY
     SELECT 
         u.id AS teacher_id,
@@ -285,9 +299,10 @@ BEGIN
 END;
 $$;
 
+REVOKE EXECUTE ON FUNCTION public.get_history_teachers_overview() FROM anon;
 GRANT EXECUTE ON FUNCTION public.get_history_teachers_overview() TO authenticated;
 
--- 2.6 Fungsi Transfer Kepemilikan Murid & Laporan oleh Admin
+-- 2.6 Fungsi Transfer Kepemilikan Murid, Laporan & Feedback oleh Admin
 CREATE OR REPLACE FUNCTION public.transfer_student(
     target_student_id UUID,
     new_teacher_id UUID
@@ -302,18 +317,26 @@ BEGIN
         RAISE EXCEPTION 'Akses ditolak: Hanya admin yang dapat memindahkan murid.';
     END IF;
 
+    -- 1. Pindahkan kepemilikan murid
     UPDATE public.students 
     SET user_id = new_teacher_id, updated_at = now()
     WHERE id = target_student_id;
 
+    -- 2. Pindahkan seluruh riwayat laporan pertemuan
     UPDATE public.reports
     SET user_id = new_teacher_id, updated_at = now()
+    WHERE student_id = target_student_id;
+
+    -- 3. Pindahkan seluruh masukan orang tua (feedbacks) ke pengajar baru
+    UPDATE public.feedbacks
+    SET user_id = new_teacher_id
     WHERE student_id = target_student_id;
 
     RETURN TRUE;
 END;
 $$;
 
+REVOKE EXECUTE ON FUNCTION public.transfer_student(UUID, UUID) FROM anon;
 GRANT EXECUTE ON FUNCTION public.transfer_student(UUID, UUID) TO authenticated;
 
 -- =====================================================================
@@ -348,10 +371,9 @@ ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.feedbacks ENABLE ROW LEVEL SECURITY;
 
 -- 4.1 Policies Tabel STUDENTS
+-- Catatan Keamanan: Akses anonim dinonaktifkan untuk mencegah kebocoran data PostgREST.
+-- Akses portal orang tua dilayani secara aman via Server-Side Rendering (createAdminClient).
 DROP POLICY IF EXISTS "Allow anonymous read on students" ON public.students;
-CREATE POLICY "Allow anonymous read on students" 
-    ON public.students FOR SELECT TO anon 
-    USING (true);
 
 DROP POLICY IF EXISTS "Users can perform all actions on their own students" ON public.students;
 CREATE POLICY "Users can perform all actions on their own students" 
@@ -360,10 +382,8 @@ CREATE POLICY "Users can perform all actions on their own students"
     WITH CHECK (auth.uid() = user_id OR public.is_admin());
 
 -- 4.2 Policies Tabel REPORTS
+-- Catatan Keamanan: Akses anonim dinonaktifkan untuk mencegah kebocoran data PostgREST.
 DROP POLICY IF EXISTS "Allow anonymous read on reports" ON public.reports;
-CREATE POLICY "Allow anonymous read on reports" 
-    ON public.reports FOR SELECT TO anon 
-    USING (true);
 
 DROP POLICY IF EXISTS "Users can perform all actions on their own reports" ON public.reports;
 CREATE POLICY "Users can perform all actions on their own reports" 

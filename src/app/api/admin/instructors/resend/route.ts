@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { isUserAdmin, resendInvite } from '@/lib/instructorAuth'
+import { logServerAuditEvent } from '@/lib/auditLogger'
 
 export async function POST(request: Request) {
   try {
@@ -24,6 +25,16 @@ export async function POST(request: Request) {
 
     const origin = new URL(request.url).origin
     const result = await resendInvite({ email, origin })
+
+    await logServerAuditEvent({
+      userId: user.id,
+      userEmail: user.email || null,
+      userName: user.user_metadata?.teacher_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Admin',
+      action: 'resend_invite',
+      entityType: 'invite',
+      description: `Mengirim ulang tautan aktivasi instruktur ke ${email}`,
+      details: { email }
+    })
 
     return NextResponse.json(result)
   } catch (err: any) {

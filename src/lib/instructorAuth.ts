@@ -302,7 +302,8 @@ export async function inviteInstructor(params: {
     throw new Error(`Instruktur dengan email ${normalizedEmail} sudah terdaftar dan aktif.`)
   }
 
-  const redirectUrl = `${origin}/auth/activate?invited_email=${encodeURIComponent(normalizedEmail)}`
+  const inviteToken = crypto.randomUUID()
+  const redirectUrl = `${origin}/auth/activate?invited_email=${encodeURIComponent(normalizedEmail)}&token=${inviteToken}`
 
   // 1. Attempt to trigger email dispatch via Supabase Auth
   try {
@@ -363,7 +364,7 @@ export async function inviteInstructor(params: {
         name,
         role,
         status: 'pending',
-        activation_token: actionLink,
+        activation_token: inviteToken,
         invited_by: invitedBy || null,
         invited_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -405,7 +406,8 @@ export async function resendInvite(params: {
     throw new Error('Supabase admin client is not configured.')
   }
 
-  const redirectUrl = `${origin}/auth/activate?invited_email=${encodeURIComponent(normalizedEmail)}`
+  const inviteToken = crypto.randomUUID()
+  const redirectUrl = `${origin}/auth/activate?invited_email=${encodeURIComponent(normalizedEmail)}&token=${inviteToken}`
 
   // Re-send via Supabase
   try {
@@ -432,7 +434,7 @@ export async function resendInvite(params: {
     await adminClient
       .from('instructor_invitations')
       .update({
-        activation_token: actionLink,
+        activation_token: inviteToken,
         invited_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
@@ -487,7 +489,7 @@ export async function revokeInvite(email: string): Promise<void> {
 }
 
 /**
- * Removes an active instructor and cascades deletion or revokes access.
+ * Removes an active instructor with safety checks against accidental student data loss.
  */
 export async function removeInstructorMember(userId: string, currentAdminId: string): Promise<void> {
   if (userId === currentAdminId) {
@@ -499,15 +501,53 @@ export async function removeInstructorMember(userId: string, currentAdminId: str
     throw new Error('Supabase admin client is not configured.')
   }
 
-  // Delete from auth.users
+  // 1. Fetch user to verify existence and retrieve email
+  const { data: userData, error: fetchErr } = await adminClient.auth.admin.getUserById(userId)
+  if (fetchErr || !userData?.user) {
+    throw new Error('Data instruktur tidak ditemukan di sistem.')
+  }
+  const userEmail = userData.user.email?.toLowerCase()
+
+  // 2. Safety Guard: Check if instructor still has active students
+  const { count: studentCount } = await adminClient
+    .from('students')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .is('deleted_at', null)
+
+  if (studentCount && studentCount > 0) {
+    throw new Error(
+      `Instruktur ini masih mengampu ${studentCount} murid aktif. Harap pindahkan (transfer) seluruh murid ke pengajar lain terlebih dahulu sebelum menghapus akun ini.`
+    )
+  }
+
+  // 3. Delete from auth.users
   const { error } = await adminClient.auth.admin.deleteUser(userId)
   if (error) {
     throw new Error(`Gagal menghapus instruktur: ${error.message}`)
   }
 
-  // Also clean up any whitelist entry
+  // 4. Clean up whitelist entry, fallback whitelist, and custom profile settings
+  if (userEmail) {
+    try {
+      await adminClient.from('instructor_invitations').delete().eq('email', userEmail)
+    } catch {
+      // Ignore
+    }
+
+    try {
+      const currentList = await getFallbackWhitelist()
+      const filtered = currentList.filter(i => i.email.toLowerCase() !== userEmail)
+      if (filtered.length !== currentList.length) {
+        await saveFallbackWhitelist(filtered)
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
   try {
-    await adminClient.from('instructor_invitations').delete().eq('id', userId)
+    await adminClient.from('app_settings').delete().eq('key', `teacher_name_${userId}`)
   } catch {
     // Ignore
   }

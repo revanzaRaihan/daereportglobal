@@ -25,30 +25,61 @@ export default function LocaleProvider({ children }: { children: React.ReactNode
       setLocaleState(cached)
     }
 
-    // 2. Sync from Supabase db (source of truth)
-    const fetchDbLocale = async () => {
+    // 2. Sync from Supabase user_metadata (source of truth per user)
+    const fetchUserLocale = async () => {
       try {
-        const { data } = await supabase.from('app_settings').select('value').eq('key', 'app_locale').maybeSingle()
-        if (data?.value === 'id' || data?.value === 'en') {
-          setLocaleState(data.value as Locale)
-          localStorage.setItem('app_locale', data.value)
+        const { data: { user } } = await supabase.auth.getUser()
+        const userLocale = user?.user_metadata?.app_locale as Locale
+        if (userLocale === 'id' || userLocale === 'en') {
+          setLocaleState(userLocale)
+          try {
+            localStorage.setItem('app_locale', userLocale)
+          } catch {
+            // Ignore storage write error
+          }
         }
       } catch (e) {
-        console.error('Failed to load locale setting', e)
+        console.error('Failed to load user locale setting', e)
       }
     }
-    fetchDbLocale()
-  }, [])
+    fetchUserLocale()
+
+    // 3. Listen to auth state changes to re-sync when user signs in or profile updates
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const userLocale = session?.user?.user_metadata?.app_locale as Locale
+      if (userLocale === 'id' || userLocale === 'en') {
+        setLocaleState(userLocale)
+        try {
+          localStorage.setItem('app_locale', userLocale)
+        } catch {
+          // Ignore storage write error
+        }
+      }
+    })
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [supabase])
 
   const setLocale = async (newLocale: Locale) => {
     setLocaleState(newLocale)
-    localStorage.setItem('app_locale', newLocale)
-    
-    // Save to Supabase db
     try {
-      await supabase.from('app_settings').upsert({ key: 'app_locale', value: newLocale })
+      localStorage.setItem('app_locale', newLocale)
+    } catch {
+      // Ignore storage write error
+    }
+    
+    // Save to user_metadata if user is logged in
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.auth.updateUser({
+          data: { app_locale: newLocale }
+        })
+      }
     } catch (e) {
-      console.error('Failed to save locale to database', e)
+      console.error('Failed to save locale to user metadata', e)
     }
   }
 
