@@ -5,6 +5,7 @@ import {
   getInstructorsOverview, 
   inviteInstructor 
 } from '@/lib/instructorAuth'
+import { logServerAuditEvent } from '@/lib/auditLogger'
 
 export async function GET(request: Request) {
   try {
@@ -54,6 +55,16 @@ export async function POST(request: Request) {
       role: role === 'admin' ? 'admin' : 'teacher',
       invitedBy: user.id,
       origin
+    })
+
+    await logServerAuditEvent({
+      userId: user.id,
+      userEmail: user.email || null,
+      userName: user.user_metadata?.teacher_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Admin',
+      action: 'invite_instructor',
+      entityType: 'invite',
+      description: `Mengirim undangan instruktur ke ${email} (${role === 'admin' ? 'Admin Cabang' : 'Instruktur'})`,
+      details: { email, name, role }
     })
 
     return NextResponse.json(result)

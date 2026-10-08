@@ -39,6 +39,7 @@ function ActivateContent() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [token, setToken] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   
   // UI states
@@ -60,6 +61,15 @@ function ActivateContent() {
         const invitedEmailParam = 
           searchParams.get('invited_email') || 
           searchParams.get('email')
+
+        const tokenParam = 
+          searchParams.get('token') || 
+          searchParams.get('token_hash') || 
+          searchParams.get('code')
+
+        if (tokenParam) {
+          setToken(tokenParam)
+        }
 
         // 1. Get current browser auth user if any
         const { data: { user } } = await supabase.auth.getUser()
@@ -147,7 +157,8 @@ function ActivateContent() {
         body: JSON.stringify({
           username: username.trim(),
           password,
-          email
+          email,
+          token: token || undefined
         })
       })
 

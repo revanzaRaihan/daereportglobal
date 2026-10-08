@@ -53,7 +53,7 @@ export default function SettingsPage() {
   const [apiKey, setApiKey] = useState('')
   const [maskedKey, setMaskedKey] = useState('')
   const [waNumber, setWaNumber] = useState(() => cachedSettings?.admin_wa_number || '')
-  const [locale, setLocale] = useState(() => cachedSettings?.app_locale || 'id')
+  const [locale, setLocale] = useState(() => currentLocale || 'id')
 
   // UI States
   const [showKey, setShowKey] = useState(false)
@@ -90,7 +90,10 @@ export default function SettingsPage() {
         const md = settingsMap.get('ai_model') || (prov === 'gemini' ? 'gemini-2.5-flash' : 'llama-3.1-8b-instant')
         const keyVal = settingsMap.get('ai_api_key') || ''
         const wa = settingsMap.get('admin_wa_number') || ''
-        const loc = settingsMap.get('app_locale') || 'id'
+        const userLocale = 
+          (user?.user_metadata?.app_locale as 'id' | 'en') || 
+          (currentLocale as 'id' | 'en') || 
+          'id'
 
         const userTeacherName = 
           user?.user_metadata?.teacher_name || 
@@ -102,7 +105,7 @@ export default function SettingsPage() {
         setProvider(prov)
         setModel(md)
         setWaNumber(wa)
-        setLocale(loc)
+        setLocale(userLocale)
         setTeacherName(userTeacherName)
 
         // Setup masked key
@@ -163,8 +166,7 @@ export default function SettingsPage() {
         upserts.push(
           { key: 'ai_provider', value: provider },
           { key: 'ai_model', value: model },
-          { key: 'admin_wa_number', value: waNumber },
-          { key: 'app_locale', value: locale }
+          { key: 'admin_wa_number', value: waNumber }
         )
 
         if (keyModified && !apiKey.includes('*')) {
@@ -183,17 +185,41 @@ export default function SettingsPage() {
         if (error) throw error
       }
 
+      // Save user-specific profile & locale preference to user_metadata
+      const metadataUpdates: Record<string, any> = {
+        app_locale: locale
+      }
       if (teacherName.trim()) {
-        await supabase.auth.updateUser({
-          data: {
-            teacher_name: teacherName.trim(),
-            full_name: teacherName.trim(),
-            display_name: teacherName.trim()
-          }
-        })
+        metadataUpdates.teacher_name = teacherName.trim()
+        metadataUpdates.full_name = teacherName.trim()
+        metadataUpdates.display_name = teacherName.trim()
       }
 
+      const { error: userMetaError } = await supabase.auth.updateUser({
+        data: metadataUpdates
+      })
+      if (userMetaError) throw userMetaError
+
       await updateGlobalLocale(locale as 'id' | 'en')
+
+      if (isAdmin) {
+        fetch('/api/admin/audit-logs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'update_ai_settings',
+            entityType: 'settings',
+            description: `Memperbarui konfigurasi AI (Provider: ${provider}, Model: ${model}${keyModified ? ', API Key diperbarui' : ''})`,
+            details: {
+              provider,
+              model,
+              key_modified: keyModified,
+              wa_updated: !!waNumber
+            }
+          })
+        }).catch(console.error)
+      }
+
       triggerToast('success', t('msg_settings_saved'))
       fetchSettings()
       router.refresh()
@@ -352,7 +378,7 @@ export default function SettingsPage() {
                       { value: 'en', label: 'English' }
                     ]}
                     value={locale}
-                    onChange={(val) => setLocale(val)}
+                    onChange={(val) => setLocale(val as 'id' | 'en')}
                     isSearchable={false}
                   />
                 </div>

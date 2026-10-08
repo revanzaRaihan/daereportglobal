@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { isUserAdmin, revokeInvite } from '@/lib/instructorAuth'
+import { logServerAuditEvent } from '@/lib/auditLogger'
 
 export async function POST(request: Request) {
   try {
@@ -23,6 +24,16 @@ export async function POST(request: Request) {
     }
 
     await revokeInvite(email)
+
+    await logServerAuditEvent({
+      userId: user.id,
+      userEmail: user.email || null,
+      userName: user.user_metadata?.teacher_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Admin',
+      action: 'revoke_invite',
+      entityType: 'invite',
+      description: `Membatalkan (revoke) undangan instruktur untuk ${email}`,
+      details: { email }
+    })
 
     return NextResponse.json({ success: true, message: `Undangan untuk ${email} berhasil dibatalkan.` })
   } catch (err: any) {

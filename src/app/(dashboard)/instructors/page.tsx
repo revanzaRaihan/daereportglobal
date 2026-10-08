@@ -18,9 +18,12 @@ import {
   AlertCircle, 
   Loader2, 
   X,
-  BookOpen
+  BookOpen,
+  History,
+  RefreshCw
 } from 'lucide-react'
 import { InstructorMember, PendingInvite } from '@/lib/instructorAuth'
+import { AuditLogItem } from '@/lib/auditLogger'
 
 export default function InstructorsPage() {
   const router = useRouter()
@@ -31,13 +34,15 @@ export default function InstructorsPage() {
   // Data states
   const [activeMembers, setActiveMembers] = useState<InstructorMember[]>([])
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([])
+  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([])
+  const [loadingAuditLogs, setLoadingAuditLogs] = useState(false)
   const [loading, setLoading] = useState(true)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
 
   // Search & tab states
   const [searchQuery, setSearchQuery] = useState('')
-  const [activeTab, setActiveTab] = useState<'active' | 'pending'>('active')
+  const [activeTab, setActiveTab] = useState<'active' | 'pending' | 'audit'>('active')
 
   // Modal states
   const [showInviteModal, setShowInviteModal] = useState(false)
@@ -47,6 +52,15 @@ export default function InstructorsPage() {
   const [inviteSubmitting, setInviteSubmitting] = useState(false)
   const [inviteSuccessLink, setInviteSuccessLink] = useState('')
   const [inviteError, setInviteError] = useState('')
+
+  // Safe Deoffboarding states
+  const [deoffboardingMember, setDeoffboardingMember] = useState<InstructorMember | null>(null)
+  const [assignedStudents, setAssignedStudents] = useState<{ id: string; name: string; subject: string }[]>([])
+  const [loadingAssignedStudents, setLoadingAssignedStudents] = useState(false)
+  const [targetTransferTeacherId, setTargetTransferTeacherId] = useState('')
+  const [deoffboardStep, setDeoffboardStep] = useState<'review' | 'transferring' | 'deleting'>('review')
+  const [transferProgress, setTransferProgress] = useState<{ current: number; total: number } | null>(null)
+  const [deoffboardError, setDeoffboardError] = useState('')
 
   // Toast / Action feedback states
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -193,35 +207,133 @@ export default function InstructorsPage() {
     })
   }
 
-  // Remove active member
-  const handleRemoveMember = (member: InstructorMember) => {
+  // Safe Deoffboarding Handlers
+  const handleStartDeoffboard = async (member: InstructorMember) => {
     if (member.id === currentUserId) {
       triggerToast('error', locale === 'id' ? 'Anda tidak dapat menghapus akun Anda sendiri.' : 'You cannot remove your own account.')
       return
     }
 
-    confirm({
-      message: locale === 'id' 
-        ? `Hapus akses instruktur untuk ${member.name} (${member.email})? Pengajar ini tidak akan dapat login lagi.`
-        : `Remove instructor access for ${member.name} (${member.email})? This teacher will lose all access.`,
-      onConfirm: async () => {
-        try {
-          const res = await fetch('/api/admin/instructors/remove', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: member.id })
-          })
+    setDeoffboardingMember(member)
+    setTargetTransferTeacherId('')
+    setDeoffboardError('')
+    setDeoffboardStep('review')
 
-          const data = await res.json()
-          if (!res.ok) throw new Error(data.error || 'Gagal menghapus instruktur.')
-
-          triggerToast('success', locale === 'id' ? `Akses ${member.name} berhasil dihapus.` : `Removed ${member.name}.`)
-          await fetchData()
-        } catch (err: any) {
-          triggerToast('error', err.message || 'Gagal menghapus.')
-        }
+    if ((member.studentCount || 0) > 0) {
+      setLoadingAssignedStudents(true)
+      try {
+        const { data, error } = await supabase
+          .from('students')
+          .select('id, name, subject')
+          .eq('user_id', member.id)
+          .order('name', { ascending: true })
+        if (error) throw error
+        setAssignedStudents(data || [])
+      } catch (err: any) {
+        console.error('Failed to load students for instructor:', err)
+        setAssignedStudents([])
+      } finally {
+        setLoadingAssignedStudents(false)
       }
-    })
+    } else {
+      setAssignedStudents([])
+    }
+  }
+
+  const handleExecuteSafeDeoffboard = async () => {
+    if (!deoffboardingMember) return
+    setDeoffboardError('')
+
+    const hasStudents = (deoffboardingMember.studentCount || 0) > 0
+
+    // If instructor has active students, must select a target teacher
+    if (hasStudents) {
+      if (!targetTransferTeacherId) {
+        setDeoffboardError(
+          locale === 'id' 
+            ? 'Harap pilih pengajar pengganti sebelum melakukan transfer murid dan penghapusan akun.' 
+            : 'Please select a replacement instructor before transferring students and removing this account.'
+        )
+        return
+      }
+
+      setDeoffboardStep('transferring')
+      setTransferProgress({ current: 0, total: assignedStudents.length })
+      try {
+        let count = 0
+        for (const student of assignedStudents) {
+          const { error: transferErr } = await supabase.rpc('transfer_student', {
+            target_student_id: student.id,
+            new_teacher_id: targetTransferTeacherId
+          })
+          if (transferErr) throw transferErr
+          count++
+          setTransferProgress({ current: count, total: assignedStudents.length })
+        }
+      } catch (err: any) {
+        setDeoffboardError(
+          locale === 'id'
+            ? `Gagal memindahkan murid: ${err.message || 'Terjadi kesalahan sistem'}`
+            : `Failed to transfer students: ${err.message || 'System error'}`
+        )
+        setDeoffboardStep('review')
+        setTransferProgress(null)
+        return
+      }
+    }
+
+    // Now proceed with instructor deletion
+    setDeoffboardStep('deleting')
+    try {
+      const res = await fetch('/api/admin/instructors/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId: deoffboardingMember.id,
+          instructorName: deoffboardingMember.name,
+          instructorEmail: deoffboardingMember.email
+        })
+      })
+
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Gagal menghapus instruktur.')
+
+      const targetTeacher = activeMembers.find(m => m.id === targetTransferTeacherId)
+
+      if (hasStudents) {
+        fetch('/api/admin/audit-logs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'batch_transfer_students',
+            entityType: 'student',
+            description: `Transfer massal ${assignedStudents.length} murid dari ${deoffboardingMember.name} ke ${targetTeacher?.name || 'guru baru'}`,
+            details: {
+              studentCount: assignedStudents.length,
+              sourceTeacher: deoffboardingMember.name,
+              targetTeacher: targetTeacher?.name,
+              targetTeacherId: targetTransferTeacherId
+            }
+          })
+        }).catch(console.error)
+      }
+
+      triggerToast(
+        'success',
+        hasStudents
+          ? (locale === 'id'
+              ? `Berhasil! Seluruh ${assignedStudents.length} murid dialihkan ke ${targetTeacher?.name || 'pengajar baru'} dan akun ${deoffboardingMember.name} telah dinonaktifkan.`
+              : `Success! Transferred all ${assignedStudents.length} students to ${targetTeacher?.name || 'new instructor'} and removed ${deoffboardingMember.name}.`)
+          : (locale === 'id'
+              ? `Akses instruktur ${deoffboardingMember.name} berhasil dihapus.`
+              : `Successfully removed instructor ${deoffboardingMember.name}.`)
+      )
+      setDeoffboardingMember(null)
+      await fetchData()
+    } catch (err: any) {
+      setDeoffboardError(err.message || 'Gagal menghapus instruktur.')
+      setDeoffboardStep('review')
+    }
   }
 
   // Copy activation link helper
@@ -250,6 +362,70 @@ export default function InstructorsPage() {
       p.name.toLowerCase().includes(q)
     )
   }, [pendingInvites, searchQuery])
+
+  const fetchAuditLogsList = async () => {
+    setLoadingAuditLogs(true)
+    try {
+      const res = await fetch('/api/admin/audit-logs')
+      const data = await res.json()
+      if (data?.logs) {
+        setAuditLogs(data.logs)
+      }
+    } catch (err) {
+      console.error('Failed to load audit logs:', err)
+    } finally {
+      setLoadingAuditLogs(false)
+    }
+  }
+
+  const filteredAuditLogs = useMemo(() => {
+    if (!searchQuery.trim()) return auditLogs
+    const q = searchQuery.toLowerCase()
+    return auditLogs.filter(log =>
+      log.description?.toLowerCase().includes(q) ||
+      log.action?.toLowerCase().includes(q) ||
+      log.user_email?.toLowerCase().includes(q) ||
+      log.user_name?.toLowerCase().includes(q)
+    )
+  }, [auditLogs, searchQuery])
+
+  const formatTimestamp = (iso: string) => {
+    try {
+      const d = new Date(iso)
+      return d.toLocaleString(locale === 'id' ? 'id-ID' : 'en-US', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    } catch {
+      return iso
+    }
+  }
+
+  const getActionMeta = (action: string) => {
+    switch (action) {
+      case 'transfer_student':
+        return { label: locale === 'id' ? 'Transfer Murid' : 'Transfer Student' }
+      case 'batch_transfer_students':
+        return { label: locale === 'id' ? 'Transfer Massal' : 'Batch Transfer' }
+      case 'update_ai_settings':
+        return { label: locale === 'id' ? 'Pengaturan AI' : 'AI Settings' }
+      case 'invite_instructor':
+        return { label: locale === 'id' ? 'Undang Guru' : 'Invite Teacher' }
+      case 'revoke_invite':
+        return { label: locale === 'id' ? 'Batalkan Undangan' : 'Revoke Invite' }
+      case 'resend_invite':
+        return { label: locale === 'id' ? 'Kirim Ulang' : 'Resend Invite' }
+      case 'remove_instructor':
+        return { label: locale === 'id' ? 'Hapus Instruktur' : 'Remove Teacher' }
+      case 'delete_report':
+        return { label: locale === 'id' ? 'Hapus Laporan' : 'Delete Report' }
+      default:
+        return { label: action }
+    }
+  }
 
   const getInitials = (name: string) => {
     if (!name) return 'IN'
@@ -343,6 +519,18 @@ export default function InstructorsPage() {
           >
             {locale === 'id' ? 'Menunggu Aktivasi' : 'Pending Activation'} ({pendingInvites.length})
           </button>
+          <button
+            onClick={() => {
+              setActiveTab('audit')
+              fetchAuditLogsList()
+            }}
+            className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer font-mono flex items-center gap-1.5 ${
+              activeTab === 'audit' ? 'bg-black text-white font-bold' : 'text-neutral-500 hover:text-black'
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>{locale === 'id' ? 'Jejak Audit' : 'Audit Trail'}</span>
+          </button>
         </div>
       </div>
 
@@ -416,7 +604,7 @@ export default function InstructorsPage() {
                             {!isCurrent ? (
                               <button
                                 type="button"
-                                onClick={() => handleRemoveMember(member)}
+                                onClick={() => handleStartDeoffboard(member)}
                                 className="text-neutral-400 hover:text-black p-1.5 hover:bg-neutral-100 rounded-lg transition-colors cursor-pointer"
                                 title={locale === 'id' ? 'Hapus Akses Instruktur' : 'Remove Access'}
                               >
@@ -436,7 +624,7 @@ export default function InstructorsPage() {
           )}
         </div>
 
-      ) : (
+      ) : activeTab === 'pending' ? (
 
         /* PENDING INVITATIONS TAB (TABLE VIEW) */
         <div>
@@ -536,6 +724,87 @@ export default function InstructorsPage() {
                                 <Trash2 className="w-4 h-4" />
                               </button>
                             </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+      ) : (
+
+        /* AUDIT TRAIL TAB (TABLE VIEW) */
+        <div>
+          <div className="flex items-center justify-between mb-3 px-1">
+            <span className="text-xs font-mono text-neutral-400">
+              {locale === 'id' 
+                ? `Menampilkan ${filteredAuditLogs.length} catatan aktivitas sistem`
+                : `Showing ${filteredAuditLogs.length} system activity records`}
+            </span>
+            <button
+              type="button"
+              onClick={fetchAuditLogsList}
+              disabled={loadingAuditLogs}
+              className="text-neutral-500 hover:text-black font-mono text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-black/10 bg-white hover:bg-neutral-50 cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingAuditLogs ? 'animate-spin' : ''}`} />
+              <span>{locale === 'id' ? 'Segarkan' : 'Refresh'}</span>
+            </button>
+          </div>
+
+          {loadingAuditLogs ? (
+            <div className="h-64 flex justify-center items-center bg-white border border-black/10 rounded-2xl">
+              <Loader2 className="w-6 h-6 text-black animate-spin" />
+            </div>
+          ) : filteredAuditLogs.length === 0 ? (
+            <div className="border border-dashed border-black/10 bg-white rounded-2xl p-16 text-center text-neutral-400 shadow-none">
+              <History className="w-10 h-10 text-neutral-300 mx-auto mb-3" />
+              <p className="font-bold text-black text-sm font-mono uppercase tracking-wider">
+                {locale === 'id' ? 'Belum Ada Jejak Audit' : 'No Audit Records Found'}
+              </p>
+              <p className="text-xs text-neutral-500 mt-1">
+                {locale === 'id' 
+                  ? 'Seluruh riwayat aksi krusial (transfer murid, update AI key, perubahan instruktur) akan tercatat otomatis di sini.' 
+                  : 'All critical administrative operations will be tracked automatically here.'}
+              </p>
+            </div>
+          ) : (
+            <div className="bg-white border border-black/10 rounded-2xl overflow-hidden shadow-none">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-black/10 text-[10px] font-bold text-neutral-500 uppercase tracking-widest bg-neutral-50 font-mono">
+                      <th className="p-4">{locale === 'id' ? 'Waktu' : 'Timestamp'}</th>
+                      <th className="p-4">{locale === 'id' ? 'Aktivitas' : 'Action'}</th>
+                      <th className="p-4">{locale === 'id' ? 'Pelaksana' : 'Actor'}</th>
+                      <th className="p-4">{locale === 'id' ? 'Deskripsi' : 'Description'}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-black/5 text-sm text-neutral-700">
+                    {filteredAuditLogs.map((log) => {
+                      const meta = getActionMeta(log.action)
+                      return (
+                        <tr key={log.id} className="hover:bg-neutral-50/50 transition-colors font-mono">
+                          <td className="p-4 text-xs text-neutral-500 whitespace-nowrap">
+                            {formatTimestamp(log.created_at)}
+                          </td>
+                          <td className="p-4 whitespace-nowrap">
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-bold font-mono bg-neutral-100 text-black border border-black/10">
+                              {meta.label}
+                            </span>
+                          </td>
+                          <td className="p-4 whitespace-nowrap">
+                            <span className="text-xs font-bold text-black block">{log.user_name || 'Admin'}</span>
+                            {log.user_email && (
+                              <span className="text-[10px] text-neutral-400 block">{log.user_email}</span>
+                            )}
+                          </td>
+                          <td className="p-4">
+                            <p className="text-xs text-black leading-relaxed font-sans">{log.description}</p>
                           </td>
                         </tr>
                       )
@@ -732,6 +1001,180 @@ export default function InstructorsPage() {
                   </button>
                 </div>
               </form>
+            )}
+
+          </div>
+        </div>
+      )}
+
+      {/* SAFE DEOFFBOARDING MODAL */}
+      {deoffboardingMember && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="w-full max-w-lg bg-white border border-black/10 rounded-2xl p-6 shadow-none relative space-y-4">
+            
+            {/* Close button */}
+            <button 
+              type="button"
+              disabled={deoffboardStep !== 'review'}
+              onClick={() => setDeoffboardingMember(null)}
+              className="absolute right-4 top-4 text-neutral-400 hover:text-black p-1 rounded-lg cursor-pointer disabled:opacity-40"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Modal Title & Member Info */}
+            <div>
+              <h3 className="text-base font-bold text-black uppercase tracking-wider font-mono">
+                {locale === 'id' ? 'Hapus Akses Instruktur' : 'Remove Instructor'}
+              </h3>
+              <p className="text-xs text-neutral-500 font-mono mt-1">
+                {deoffboardingMember.name} • {deoffboardingMember.email}
+              </p>
+            </div>
+
+            {/* Error Banner */}
+            {deoffboardError && (
+              <div className="bg-white border border-black text-black text-xs px-4 py-3 rounded-xl font-bold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-black shrink-0" />
+                <span>{deoffboardError}</span>
+              </div>
+            )}
+
+            {/* Content: Has students vs 0 students */}
+            {(deoffboardingMember.studentCount || 0) > 0 ? (
+              <div className="space-y-4">
+                <p className="text-xs text-neutral-600 font-mono leading-relaxed">
+                  {locale === 'id'
+                    ? `Instruktur ini memiliki ${deoffboardingMember.studentCount} murid aktif. Silakan pilih pengajar pengganti untuk mengalihkan murid sebelum akun dihapus.`
+                    : `This instructor has ${deoffboardingMember.studentCount} active students. Please select a replacement teacher before removing this account.`}
+                </p>
+
+                {/* Replacement Teacher Selector */}
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5 font-mono">
+                    {locale === 'id' ? 'Pilih Pengajar Pengganti' : 'Select Replacement Teacher'} *
+                  </label>
+                  <select
+                    disabled={deoffboardStep !== 'review'}
+                    value={targetTransferTeacherId}
+                    onChange={(e) => setTargetTransferTeacherId(e.target.value)}
+                    className="form-select-premium font-mono text-xs cursor-pointer w-full"
+                  >
+                    <option value="">{locale === 'id' ? '-- Pilih Guru Pengganti --' : '-- Select Teacher --'}</option>
+                    {activeMembers
+                      .filter(m => m.id !== deoffboardingMember.id)
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.studentCount || 0} {locale === 'id' ? 'murid' : 'students'})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {/* Compact Students List */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest font-mono">
+                      {locale === 'id' ? 'Daftar Murid yang Dialihkan' : 'Students to Transfer'} ({loadingAssignedStudents ? '...' : assignedStudents.length})
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => router.push('/students')}
+                      className="text-[10px] text-neutral-500 hover:text-black font-mono underline cursor-pointer"
+                    >
+                      {locale === 'id' ? 'Buka Halaman Murid ↗' : 'Manage in Students ↗'}
+                    </button>
+                  </div>
+
+                  <div className="max-h-28 overflow-y-auto bg-neutral-50 border border-black/10 rounded-xl p-2.5 divide-y divide-black/5 text-xs font-mono">
+                    {loadingAssignedStudents ? (
+                      <div className="py-2 text-center text-neutral-400">Memuat murid...</div>
+                    ) : assignedStudents.length === 0 ? (
+                      <div className="py-2 text-center text-neutral-400">Tidak ada data murid</div>
+                    ) : (
+                      assignedStudents.map((s) => (
+                        <div key={s.id} className="py-1 flex items-center justify-between first:pt-0 last:pb-0">
+                          <span className="font-semibold text-black">{s.name}</span>
+                          <span className="text-neutral-500 text-[11px]">{s.subject || 'Reguler'}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="pt-3 flex justify-end gap-2.5 border-t border-black/10">
+                  <button
+                    type="button"
+                    disabled={deoffboardStep !== 'review'}
+                    onClick={() => setDeoffboardingMember(null)}
+                    className="bg-white border border-black/10 hover:bg-neutral-100 text-black font-semibold px-4 py-2.5 rounded-xl cursor-pointer text-xs uppercase tracking-wider font-mono disabled:opacity-40"
+                  >
+                    {locale === 'id' ? 'Batal' : 'Cancel'}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={!targetTransferTeacherId || deoffboardStep !== 'review'}
+                    onClick={handleExecuteSafeDeoffboard}
+                    className="bg-black hover:bg-neutral-800 disabled:bg-neutral-200 text-white font-bold px-5 py-2.5 rounded-xl flex items-center gap-1.5 shadow-none cursor-pointer text-xs uppercase tracking-wider font-mono disabled:opacity-40"
+                  >
+                    {deoffboardStep === 'transferring' ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>
+                          {transferProgress 
+                            ? `${locale === 'id' ? 'Memindahkan' : 'Transferring'} (${transferProgress.current}/${transferProgress.total})...`
+                            : (locale === 'id' ? 'Memindahkan...' : 'Transferring...')}
+                        </span>
+                      </>
+                    ) : deoffboardStep === 'deleting' ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>{locale === 'id' ? 'Menghapus...' : 'Removing...'}</span>
+                      </>
+                    ) : (
+                      <span>{locale === 'id' ? 'Pindahkan & Hapus' : 'Transfer & Remove'}</span>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-xs text-neutral-600 leading-relaxed font-mono">
+                  {locale === 'id'
+                    ? `Apakah Anda yakin ingin menghapus akses untuk ${deoffboardingMember.name} (${deoffboardingMember.email})? Pengajar ini tidak akan dapat login lagi.`
+                    : `Are you sure you want to remove access for ${deoffboardingMember.name} (${deoffboardingMember.email})? This teacher will lose all access.`}
+                </p>
+
+                {/* Modal Footer */}
+                <div className="pt-3 flex justify-end gap-2.5 border-t border-black/10">
+                  <button
+                    type="button"
+                    disabled={deoffboardStep !== 'review'}
+                    onClick={() => setDeoffboardingMember(null)}
+                    className="bg-white border border-black/10 hover:bg-neutral-100 text-black font-semibold px-4 py-2.5 rounded-xl cursor-pointer text-xs uppercase tracking-wider font-mono disabled:opacity-40"
+                  >
+                    {locale === 'id' ? 'Batal' : 'Cancel'}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={deoffboardStep !== 'review'}
+                    onClick={handleExecuteSafeDeoffboard}
+                    className="bg-black hover:bg-neutral-800 disabled:bg-neutral-200 text-white font-bold px-5 py-2.5 rounded-xl flex items-center gap-1.5 shadow-none cursor-pointer text-xs uppercase tracking-wider font-mono disabled:opacity-40"
+                  >
+                    {deoffboardStep === 'deleting' ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>{locale === 'id' ? 'Menghapus...' : 'Removing...'}</span>
+                      </>
+                    ) : (
+                      <span>{locale === 'id' ? 'Ya, Hapus' : 'Confirm Remove'}</span>
+                    )}
+                  </button>
+                </div>
+              </div>
             )}
 
           </div>
