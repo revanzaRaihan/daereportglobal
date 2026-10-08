@@ -166,11 +166,11 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJhbGciOi..."
 # Kunci Rahasia Service Role (Backend Server Saja)
 SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOi..."
 
-# Branding & Identitas Lembaga
+# Branding & Notifikasi
 NEXT_PUBLIC_APP_NAME="Daely Report Studio"
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
+NEXT_PUBLIC_BRANCH_ADMIN_EMAIL="admin@lembagaanda.com"
 
-# Kunci AI Gemini (Opsional jika ingin diisi via file, atau isi via menu Pengaturan di web)
+# Konfigurasi Mesin AI (Server-Side)
 AI_PROVIDER="gemini"
 AI_MODEL="gemini-2.5-flash"
 AI_API_KEY="AIzaSy..."

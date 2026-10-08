@@ -138,9 +138,9 @@ NEXT_PUBLIC_SUPABASE_URL="https://xxxxxxxxxxxx.supabase.co"
 NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJhbGciOi..."
 SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOi..."
 
-# Brand & System Settings
+# Brand & Notification Settings
 NEXT_PUBLIC_APP_NAME="Daely Report Studio"
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
+NEXT_PUBLIC_BRANCH_ADMIN_EMAIL="admin@yourinstitution.com"
 
 # AI Engine Configuration
 AI_PROVIDER="gemini"
