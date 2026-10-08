@@ -20,7 +20,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Forbidden: Hanya administrator cabang yang dapat melihat daftar instruktur.' }, { status: 403 })
     }
 
-    const data = await getInstructorsOverview()
+    const data = await getInstructorsOverview(supabase)
     return NextResponse.json(data)
   } catch (err: any) {
     console.error('API Error in GET /api/admin/instructors:', err)

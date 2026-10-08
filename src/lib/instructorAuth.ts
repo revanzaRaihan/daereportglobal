@@ -139,10 +139,71 @@ export async function isEmailWhitelisted(email: string): Promise<boolean> {
 /**
  * Fetches all active team members and pending invitations for the admin management page.
  */
-export async function getInstructorsOverview(): Promise<InstructorOverviewResult> {
+export async function getInstructorsOverview(fallbackClient?: any): Promise<InstructorOverviewResult> {
   const adminClient = createAdminClient()
   if (!adminClient) {
-    throw new Error('Supabase admin client is not configured.')
+    if (fallbackClient) {
+      try {
+        let teachers: any[] = []
+        try {
+          const teachersRes = await fallbackClient.rpc('get_history_teachers_overview')
+          teachers = teachersRes.data || []
+        } catch {
+          // RPC might not be deployed yet
+        }
+
+        let tableInvites: any[] = []
+        try {
+          const invitesRes = await fallbackClient.from('instructor_invitations').select('*').eq('status', 'pending')
+          tableInvites = invitesRes.data || []
+        } catch {
+          // Table might not exist yet
+        }
+
+        const activeMembers: InstructorMember[] = teachers.map((t: any) => ({
+          id: t.teacher_id,
+          email: t.email,
+          name: t.name || t.email?.split('@')[0] || 'Guru',
+          role: 'teacher',
+          status: 'active',
+          studentCount: Number(t.student_count || 0),
+          reportCount: Number(t.report_count || 0),
+          createdAt: new Date().toISOString()
+        }))
+
+        const pendingInvites: PendingInvite[] = tableInvites.map((i: any) => ({
+          id: i.id,
+          email: i.email,
+          name: i.name || '',
+          role: i.role || 'teacher',
+          invitedAt: i.invited_at,
+          actionLink: i.activation_token
+        }))
+
+        return {
+          activeMembers,
+          pendingInvites,
+          stats: {
+            totalActive: activeMembers.length,
+            totalPending: pendingInvites.length,
+            totalAdmins: 1
+          }
+        }
+      } catch (fbErr) {
+        console.warn('[getInstructorsOverview] Fallback query failed:', fbErr)
+        return {
+          activeMembers: [],
+          pendingInvites: [],
+          stats: {
+            totalActive: 0,
+            totalPending: 0,
+            totalAdmins: 1
+          }
+        }
+      }
+    }
+
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY belum diatur di server environment (.env.local atau Netlify/Vercel Environment Variables).')
   }
 
   // 1. Fetch all users from Supabase Auth
@@ -289,7 +350,7 @@ export async function inviteInstructor(params: {
 
   const adminClient = createAdminClient()
   if (!adminClient) {
-    throw new Error('Supabase admin client is not configured.')
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY belum diatur di server environment (.env.local atau Vercel Environment Variables).')
   }
 
   // Check if already an active member
@@ -403,7 +464,7 @@ export async function resendInvite(params: {
 
   const adminClient = createAdminClient()
   if (!adminClient) {
-    throw new Error('Supabase admin client is not configured.')
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY belum diatur di server environment (.env.local atau Vercel Environment Variables).')
   }
 
   const inviteToken = crypto.randomUUID()
@@ -498,7 +559,7 @@ export async function removeInstructorMember(userId: string, currentAdminId: str
 
   const adminClient = createAdminClient()
   if (!adminClient) {
-    throw new Error('Supabase admin client is not configured.')
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY belum diatur di server environment (.env.local atau Vercel Environment Variables).')
   }
 
   // 1. Fetch user to verify existence and retrieve email
