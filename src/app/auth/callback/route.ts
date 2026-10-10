@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
 import { isUserAdmin, isEmailWhitelisted } from '@/lib/instructorAuth'
+import { STARTER_STYLES, STARTER_RECOMMENDATIONS } from '@/lib/starterDatasets'
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
@@ -32,9 +33,11 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${baseUrl}/login?error=auth_callback_failed&details=${encodeURIComponent(error.message)}`)
     }
 
-    // Whitelist Security Check
+    // Whitelist Security Check (Disabled by default for Public Demo)
     const { data: { user } } = await supabase.auth.getUser()
-    if (user && !next.startsWith('/auth/activate')) {
+    const isWhitelistActive = process.env.ENABLE_WHITELIST === 'true'
+
+    if (isWhitelistActive && user && !next.startsWith('/auth/activate')) {
       const isAdmin = isUserAdmin(user)
       if (!isAdmin && user.email) {
         const whitelisted = await isEmailWhitelisted(user.email)
@@ -52,6 +55,31 @@ export async function GET(request: Request) {
             `${baseUrl}/login?error=not_whitelisted&email=${encodeURIComponent(user.email)}`
           )
         }
+      }
+    }
+
+    // Public Demo Onboarding: Auto-seed starter datasets for fresh accounts
+    if (user) {
+      try {
+        const { count } = await supabase
+          .from('dataset_entries')
+          .select('*', { count: 'exact', head: true })
+
+        if (count === 0 || count === null) {
+          const stylesToInsert = STARTER_STYLES.map(s => ({
+            ...s,
+            user_id: user.id
+          }))
+          await supabase.from('dataset_entries').insert(stylesToInsert)
+
+          const recsToInsert = STARTER_RECOMMENDATIONS.map(r => ({
+            ...r,
+            user_id: user.id
+          }))
+          await supabase.from('recommendation_datasets').insert(recsToInsert)
+        }
+      } catch (err) {
+        console.error('[Auth Callback] Auto-seed starter datasets failed:', err)
       }
     }
 

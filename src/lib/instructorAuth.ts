@@ -81,6 +81,11 @@ async function saveFallbackWhitelist(invites: PendingInvite[]): Promise<void> {
  * 3. An established instructor with existing students or reports
  */
 export async function isEmailWhitelisted(email: string): Promise<boolean> {
+  // Public Demo mode: Whitelist disabled by default unless explicitly activated via ENABLE_WHITELIST=true
+  if (process.env.ENABLE_WHITELIST !== 'true') {
+    return true
+  }
+
   const normalizedEmail = email.trim().toLowerCase()
   const adminClient = createAdminClient()
   if (!adminClient) return false

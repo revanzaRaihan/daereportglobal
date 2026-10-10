@@ -206,8 +206,8 @@ export default function LoginPage() {
             </h1>
             <p className="text-xs sm:text-sm text-text-secondary mt-1.5 leading-relaxed">
               {locale === 'id' 
-                ? 'Masuk menggunakan akun pengajar atau administrator yang telah diaktivasi.' 
-                : 'Sign in with your activated instructor or administrator account.'}
+                ? 'Masuk langsung dengan akun Google Anda untuk mencoba demo publik, atau login dengan email.' 
+                : 'Sign in directly with your Google account to try the public demo, or log in with email.'}
             </p>
           </div>
 

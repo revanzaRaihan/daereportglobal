@@ -4,6 +4,7 @@ import { createAdminClient } from '@/utils/supabase/admin'
 import { buildAiPrompt } from '@/lib/ai/promptBuilder'
 import { classifyCategory, generateReportSections, assembleReport, ReportSections } from '@/lib/ai/generator'
 import { checkRateLimit } from '@/lib/rateLimit'
+import { STARTER_STYLES, STARTER_RECOMMENDATIONS } from '@/lib/starterDatasets'
 
 export async function POST(request: NextRequest) {
   try {
@@ -123,17 +124,28 @@ export async function POST(request: NextRequest) {
     const activeModel: string = model || (activeProvider === 'gemini' ? 'gemini-2.5-flash' : 'llama-3.1-8b-instant')
 
     // 5. Check if at least one dataset entry exists for the selected language
-    const { count, error: countError } = await supabase
+    let { count, error: countError } = await supabase
       .from('dataset_entries')
       .select('*', { count: 'exact', head: true })
       .eq('language', targetLanguage)
 
     if (countError || count === null || count === 0) {
-      const langName = targetLanguage === 'en' ? 'Bahasa Inggris' : 'Bahasa Indonesia'
-      return NextResponse.json({
-        success: false,
-        message: `Silakan tambah minimal 1 contoh di tab Dataset Gaya untuk ${langName} biar AI tahu gaya nulis kamu.`
-      }, { status: 422 })
+      // Auto-seed starter datasets for smooth demo experience
+      try {
+        const stylesToInsert = STARTER_STYLES.map(s => ({
+          ...s,
+          user_id: user.id
+        }))
+        await supabase.from('dataset_entries').insert(stylesToInsert)
+
+        const recsToInsert = STARTER_RECOMMENDATIONS.map(r => ({
+          ...r,
+          user_id: user.id
+        }))
+        await supabase.from('recommendation_datasets').insert(recsToInsert)
+      } catch (seedErr) {
+        console.error('Failed to auto-seed starter datasets in generate-report:', seedErr)
+      }
     }
 
     // 6. Classify Student Behavior
