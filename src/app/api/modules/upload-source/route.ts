@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
 import { generateUlid } from '@/lib/ulid'
+import { getActiveAiConfig } from '@/lib/ai/config'
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 
@@ -93,18 +94,13 @@ export async function POST(request: NextRequest) {
     // 5. Intelligent OCR / Text Extraction for Source-to-Module
     let extractedText = ''
     try {
-      let apiKey = process.env.AI_API_KEY
-      if (!apiKey) {
-        const { data: settingsData } = await adminClient.from('app_settings').select('key, value')
-        const settings = new Map(settingsData?.map(s => [s.key, s.value]) || [])
-        apiKey = settings.get('ai_api_key') || undefined
-      }
+      const { provider: aiProvider, apiKey: aiApiKey, model: aiModel } = await getActiveAiConfig(supabase)
 
       // If Gemini API is available, extract syllabus text / concepts directly from image/PDF
-      if (apiKey && process.env.AI_PROVIDER !== 'groq') {
-        const geminiModel = process.env.AI_MODEL || 'gemini-2.5-flash'
+      if (aiApiKey && aiProvider === 'gemini') {
+        const geminiModel = aiModel || 'gemini-2.5-flash'
         const base64Data = buffer.toString('base64')
-        const ocrUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`
+        const ocrUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${aiApiKey}`
 
         const ocrRes = await fetch(ocrUrl, {
           method: 'POST',

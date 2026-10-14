@@ -21,7 +21,9 @@ import {
   ShieldCheck,
   FileText,
   Users,
-  Settings
+  Settings,
+  Zap,
+  AlertCircle
 } from 'lucide-react'
 
 export default function SettingsPage() {
@@ -58,6 +60,8 @@ export default function SettingsPage() {
   // UI States
   const [showKey, setShowKey] = useState(false)
   const [keyModified, setKeyModified] = useState(false)
+  const [testingAi, setTestingAi] = useState(false)
+  const [testAiResult, setTestAiResult] = useState<{ success: boolean; message: string; latencyMs?: number } | null>(null)
 
   // Fetch Settings
   const fetchSettings = async () => {
@@ -141,6 +145,36 @@ export default function SettingsPage() {
   const handleKeyChange = (val: string) => {
     setApiKey(val)
     setKeyModified(true)
+    setTestAiResult(null)
+  }
+
+  const handleTestAi = async () => {
+    setTestingAi(true)
+    setTestAiResult(null)
+    try {
+      const res = await fetch('/api/settings/test-ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider,
+          model,
+          apiKey: keyModified && !apiKey.includes('*') ? apiKey.trim() : undefined
+        })
+      })
+      const data = await res.json()
+      setTestAiResult({
+        success: data.success,
+        message: data.message,
+        latencyMs: data.latencyMs
+      })
+    } catch (e: any) {
+      setTestAiResult({
+        success: false,
+        message: e.message || 'Gagal menghubungi server pengujian.'
+      })
+    } finally {
+      setTestingAi(false)
+    }
   }
 
   const triggerToast = (type: 'success' | 'error', msg: string) => {
@@ -488,6 +522,52 @@ export default function SettingsPage() {
                         ? 'Kredensial API Key ini disimpan aman di database server Supabase Anda dan tidak pernah dipublikasikan keluar.' 
                         : 'This API Key is stored securely in your Supabase database and is never exposed publicly.'}
                     </p>
+
+                    {/* Test Connection Button & Result */}
+                    <div className="pt-3 border-t border-black/5 space-y-2.5">
+                      <button
+                        type="button"
+                        onClick={handleTestAi}
+                        disabled={testingAi}
+                        className="w-full py-2.5 px-3.5 bg-neutral-100 hover:bg-neutral-200 text-black text-xs font-mono font-bold rounded-xl border border-black/10 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                      >
+                        {testingAi ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>{currentLocale === 'id' ? 'Menguji Koneksi AI...' : 'Testing AI Connection...'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="w-3.5 h-3.5 text-primary" />
+                            <span>{currentLocale === 'id' ? 'Uji Koneksi AI Sekarang' : 'Test AI Connection Now'}</span>
+                          </>
+                        )}
+                      </button>
+
+                      {testAiResult && (
+                        <div
+                          className={`p-3 rounded-xl border text-xs font-mono flex items-start gap-2.5 ${
+                            testAiResult.success
+                              ? 'bg-emerald-50/70 border-emerald-300 text-emerald-900'
+                              : 'bg-rose-50/70 border-rose-300 text-rose-900'
+                          }`}
+                        >
+                          {testAiResult.success ? (
+                            <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                          ) : (
+                            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                          )}
+                          <div className="space-y-0.5">
+                            <p className="font-bold">
+                              {testAiResult.success
+                                ? (currentLocale === 'id' ? 'Koneksi Berhasil!' : 'Connection Successful!')
+                                : (currentLocale === 'id' ? 'Koneksi Gagal!' : 'Connection Failed!')}
+                            </p>
+                            <p className="text-[11px] leading-relaxed opacity-90">{testAiResult.message}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               ) : (

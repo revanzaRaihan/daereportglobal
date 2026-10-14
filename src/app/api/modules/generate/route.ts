@@ -4,6 +4,7 @@ import { createAdminClient } from '@/utils/supabase/admin'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { generateCurriculumModuleWithAi } from '@/lib/modules/aiModuleGenerator'
 import { getFrameworks } from '@/lib/modules/moduleService'
+import { getActiveAiConfig } from '@/lib/ai/config'
 
 export async function POST(request: NextRequest) {
   try {
@@ -60,35 +61,15 @@ export async function POST(request: NextRequest) {
     const selectedFw = frameworks.find(f => f.code === framework_code)
     const frameworkName = selectedFw?.name || 'Kurikulum Merdeka (CP/TP/ATP)'
 
-    // 5. Fetch Active AI Configuration
-    let provider = process.env.AI_PROVIDER
-    let apiKey = process.env.AI_API_KEY
-    let model = process.env.AI_MODEL
+    // 5. Fetch Active AI Configuration (prioritizes user settings saved in Option/Settings UI)
+    const { provider: activeProvider, apiKey: activeApiKey, model: activeModel } = await getActiveAiConfig(supabase)
 
-    if (!apiKey) {
-      const adminClient = createAdminClient()
-      const dbClient = adminClient || supabase
-      const { data: settingsData } = await dbClient.from('app_settings').select('key, value')
-      const settings = new Map(settingsData?.map(s => [s.key, s.value]) || [])
-
-      provider = provider || settings.get('ai_provider') || 'gemini'
-      apiKey = settings.get('ai_api_key') || undefined
-      model = model || settings.get('ai_model') || (provider === 'gemini' ? 'gemini-2.5-flash' : 'llama-3.1-8b-instant')
-    } else {
-      provider = provider || 'gemini'
-      model = model || (provider === 'gemini' ? 'gemini-2.5-flash' : 'llama-3.1-8b-instant')
-    }
-
-    if (!apiKey) {
+    if (!activeApiKey) {
       return NextResponse.json({
         success: false,
         message: 'API Key AI belum dikonfigurasi di Pengaturan atau Environment Server.'
       }, { status: 400 })
     }
-
-    const activeProvider = provider || 'gemini'
-    const activeApiKey = apiKey
-    const activeModel = model || (activeProvider === 'gemini' ? 'gemini-2.5-flash' : 'llama-3.1-8b-instant')
 
     // 6. Style Dataset Sample retrieval
     let styleDatasetSample = ''
