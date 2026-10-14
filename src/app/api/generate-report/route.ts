@@ -45,7 +45,8 @@ export async function POST(request: NextRequest) {
       materi = '',
       behavior,
       language = 'id',
-      report_type = 'full'
+      report_type = 'full',
+      module_context
     } = body
 
     if (!student_id || !meeting_number || !report_date || !behavior) {
@@ -168,7 +169,8 @@ export async function POST(request: NextRequest) {
           materi,
           behavior,
           category,
-          language: targetLanguage
+          language: targetLanguage,
+          moduleContext: module_context
         })
 
         reportSections = await generateReportSections(prompt, activeProvider, activeApiKey, activeModel)

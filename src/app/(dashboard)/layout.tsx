@@ -26,7 +26,8 @@ import {
   Moon,
   PenTool,
   Inbox,
-  Loader2
+  Loader2,
+  GraduationCap
 } from 'lucide-react'
 import { useTheme } from '@/components/ThemeProvider'
 
@@ -153,6 +154,7 @@ export default function DashboardLayout({
 
   const navItems = [
     { name: t('nav_create_report'), href: '/', icon: PenTool },
+    { name: t('nav_modules') || 'Modul & LKPD', href: '/studio/modules', icon: GraduationCap },
     { name: t('nav_students'), href: '/students', icon: Users },
     { name: t('nav_dataset'), href: '/dataset', icon: BookOpen },
     { name: t('nav_history'), href: '/history', icon: History },
@@ -218,7 +220,7 @@ export default function DashboardLayout({
             {/* Middle Section: Nav Links */}
             <nav className="p-4 space-y-1.5 flex-1">
               {navItems.map((item) => {
-                const isActive = pathname === item.href
+                const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
                 const Icon = item.icon
                 return (
                   <a

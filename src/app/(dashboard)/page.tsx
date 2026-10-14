@@ -44,6 +44,12 @@ export default function LaporanBuilderPage() {
   const [students, setStudents] = useState<any[]>(cachedStudents || [])
   const [languageMap, setLanguageMap] = useState<Record<string, 'id' | 'en'>>({})
   const [datasetCount, setDatasetCount] = useState<number>(cachedDatasetCount ?? 0)
+
+  // Learning Module Integration States (Feature #1)
+  const [modules, setModules] = useState<any[]>([])
+  const [selectedModuleUid, setSelectedModuleUid] = useState<string>('')
+  const [linkedModule, setLinkedModule] = useState<any | null>(null)
+  const [initialModuleUid, setInitialModuleUid] = useState<string | null>(null)
   
   // Form Inputs
   const [selectedStudentId, setSelectedStudentId] = useState('')
@@ -222,10 +228,64 @@ export default function LaporanBuilderPage() {
           setMeetingNumbersMap(meetNums)
           setNextDatesMap(nextDates)
         }
+
+        // Fetch curriculum modules for 1-Click Lesson Module linkage
+        fetch('/api/modules')
+          .then(res => res.json())
+          .then(data => {
+            if (data?.success && data?.data) {
+              setModules(data.data)
+            }
+          })
+          .catch(() => {})
       }
     }
     initPage()
   }, [supabase])
+
+  // Handle incoming ?module={uid} search param from Module Studio
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search)
+      const mod = urlParams.get('module')
+      if (mod) setInitialModuleUid(mod)
+    }
+  }, [])
+
+  // Auto-select linked module once modules are loaded
+  useEffect(() => {
+    if (initialModuleUid && modules.length > 0) {
+      const found = modules.find(m => m.uid === initialModuleUid || String(m.id) === initialModuleUid)
+      if (found) {
+        handleModuleChange(found.uid)
+      }
+    }
+  }, [initialModuleUid, modules])
+
+  const handleModuleChange = (moduleUid: string) => {
+    setSelectedModuleUid(moduleUid)
+    if (!moduleUid) {
+      setLinkedModule(null)
+      return
+    }
+    const found = modules.find(m => m.uid === moduleUid || String(m.id) === moduleUid)
+    if (found) {
+      setLinkedModule(found)
+      const p1 = found.report_seed_json?.pillar_1_milestone_summary || ''
+      const p3 = found.report_seed_json?.pillar_3_recommended_practice || ''
+
+      // Automatically prefill Pillar 1 & Pillar 3 into behavior
+      setBehavior(prev => {
+        if (!prev.trim()) {
+          return `Materi: ${p1}\nObservasi: Siswa menunjukkan fokus yang baik dan antusias dalam mempraktikkan konsep.\nRekomendasi Latihan: ${p3}`
+        }
+        if (!prev.includes(p1)) {
+          return `${p1}\n\n${prev}`
+        }
+        return prev
+      })
+    }
+  }
 
   // Keep local language in sync with global locale only if no student is selected
   useEffect(() => {
@@ -307,7 +367,12 @@ export default function LaporanBuilderPage() {
           report_date: reportDate,
           behavior,
           language,
-          report_type: reportType
+          report_type: reportType,
+          module_context: linkedModule ? {
+            topic: linkedModule.topic_title,
+            milestoneSummary: linkedModule.report_seed_json?.pillar_1_milestone_summary || '',
+            recommendedPractice: linkedModule.report_seed_json?.pillar_3_recommended_practice || ''
+          } : undefined
         })
       })
 
@@ -373,7 +438,7 @@ export default function LaporanBuilderPage() {
       }
 
       const student = students.find(s => s.id === selectedStudentId)
-      const { error: insertErr } = await supabase.from('reports').insert({
+      const reportPayload = {
         student_id: selectedStudentId,
         student_name: student.name,
         subject: student.subject,
@@ -384,9 +449,20 @@ export default function LaporanBuilderPage() {
         content: generatedText,
         image_url: imageUrl,
         user_id: student?.user_id || currentUserId,
+        learning_module_id: linkedModule?.id || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
-      })
+      }
+
+      let { error: insertErr } = await supabase.from('reports').insert(reportPayload)
+
+      // Fallback in case remote database doesn't have learning_module_id column yet
+      if (insertErr && insertErr.message?.includes('learning_module_id')) {
+        const fallbackPayload = { ...reportPayload }
+        delete (fallbackPayload as any).learning_module_id
+        const fallbackRes = await supabase.from('reports').insert(fallbackPayload)
+        insertErr = fallbackRes.error
+      }
 
       if (insertErr) {
         throw new Error(insertErr.message)
@@ -627,6 +703,53 @@ export default function LaporanBuilderPage() {
                   className="w-full bg-transparent border-0 p-0 text-sm text-text-primary font-semibold focus:ring-0 focus:outline-none"
                 />
               </div>
+            </div>
+
+            {/* Link Lesson Module Dropdown (Pre-Class Engine Integration) */}
+            <div className="border border-border-color rounded-xl p-3.5 bg-input-bg transition-all shadow-2xs hover:border-accent/40 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-[10px] font-extrabold text-text-secondary uppercase tracking-wider font-mono">
+                  <GraduationCap className="w-3.5 h-3.5 text-accent" />
+                  <span>{t('link_module_in_report') || 'Tautkan Modul Pembelajaran (Opsional)'}</span>
+                </label>
+                {linkedModule && (
+                  <button
+                    type="button"
+                    onClick={() => handleModuleChange('')}
+                    className="text-[10px] text-text-secondary hover:text-rose-500 font-semibold cursor-pointer"
+                  >
+                    Lepas Tautan
+                  </button>
+                )}
+              </div>
+
+              <CustomSelect
+                options={[
+                  { value: '', label: t('select_module_prompt') || '-- Pilih Modul Terkait Hari Ini --' },
+                  ...modules.map(m => ({
+                    value: m.uid,
+                    label: `[${m.framework_name || m.framework_code}] ${m.subject_name}: ${m.topic_title}`
+                  }))
+                ]}
+                value={selectedModuleUid}
+                onChange={(val) => handleModuleChange(val as string)}
+                placeholder={t('select_module_prompt') || '-- Pilih Modul Terkait Hari Ini --'}
+              />
+
+              {linkedModule && (
+                <div className="p-3 rounded-xl bg-accent/5 border border-accent/20 text-xs space-y-1 animate-in fade-in duration-150">
+                  <div className="flex items-center gap-1.5 text-accent font-bold text-[11px]">
+                    <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                    <span>Modul Tertaut: {linkedModule.topic_title}</span>
+                  </div>
+                  <p className="text-[11px] text-text-secondary leading-snug">
+                    <strong className="text-text-primary">Pilar 1:</strong> {linkedModule.report_seed_json?.pillar_1_milestone_summary}
+                  </p>
+                  <p className="text-[11px] text-text-secondary leading-snug">
+                    <strong className="text-text-primary">Pilar 3:</strong> {linkedModule.report_seed_json?.pillar_3_recommended_practice}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Behavior Area with Speech-to-Text */}

@@ -570,3 +570,92 @@ BEGIN
     END IF;
 END $$;
 
+-- =====================================================================
+-- 7. PRE-CLASS ENGINE: LEARNING FRAMEWORKS & MODULES (FEATURE #1)
+-- =====================================================================
+
+-- 7.1 Tabel BRANCHES (Multi-Tenant Branch Isolation)
+CREATE TABLE IF NOT EXISTS public.branches (
+    id BIGSERIAL PRIMARY KEY,
+    uid CHAR(26) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    code VARCHAR(50) UNIQUE NOT NULL,
+    logo_url TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+INSERT INTO public.branches (id, uid, name, code)
+VALUES (1, '01JFRM0000BRANCHDEFAULT0001', 'Main Branch', 'main')
+ON CONFLICT (id) DO NOTHING;
+
+-- 7.2 Tabel LEARNING_FRAMEWORKS (Standar Kurikulum Nasional & Internasional)
+CREATE TABLE IF NOT EXISTS public.learning_frameworks (
+    id BIGSERIAL PRIMARY KEY,
+    uid CHAR(26) UNIQUE NOT NULL,
+    branch_id BIGINT REFERENCES public.branches(id) ON DELETE CASCADE,
+    code VARCHAR(50) NOT NULL,
+    name VARCHAR(120) NOT NULL,
+    schema_structure JSONB NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_learning_frameworks_uid ON public.learning_frameworks(uid);
+CREATE INDEX IF NOT EXISTS idx_learning_frameworks_branch_id ON public.learning_frameworks(branch_id);
+CREATE INDEX IF NOT EXISTS idx_learning_frameworks_code ON public.learning_frameworks(code);
+
+-- 7.3 Tabel LEARNING_MODULES (Teacher Lesson Plan & Student Worksheet / LKPD)
+CREATE TABLE IF NOT EXISTS public.learning_modules (
+    id BIGSERIAL PRIMARY KEY,
+    uid CHAR(26) UNIQUE NOT NULL,
+    branch_id BIGINT NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
+    author_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+    framework_id BIGINT NOT NULL REFERENCES public.learning_frameworks(id) ON DELETE RESTRICT,
+    subject_name VARCHAR(100) NOT NULL,
+    grade_level VARCHAR(50) NOT NULL,
+    topic_title VARCHAR(255) NOT NULL,
+    language_code CHAR(2) NOT NULL DEFAULT 'id',
+    duration_minutes SMALLINT NOT NULL DEFAULT 60,
+    teacher_guide_json JSONB NOT NULL,
+    student_handout_json JSONB NOT NULL,
+    report_seed_json JSONB NOT NULL,
+    visibility_scope VARCHAR(20) NOT NULL DEFAULT 'branch' CHECK (visibility_scope IN ('private', 'branch')),
+    status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_learning_modules_uid ON public.learning_modules(uid);
+CREATE INDEX IF NOT EXISTS idx_learning_modules_branch_id ON public.learning_modules(branch_id);
+CREATE INDEX IF NOT EXISTS idx_learning_modules_author_id ON public.learning_modules(author_id);
+CREATE INDEX IF NOT EXISTS idx_learning_modules_subject_name ON public.learning_modules(subject_name);
+CREATE INDEX IF NOT EXISTS idx_learning_modules_grade_level ON public.learning_modules(grade_level);
+CREATE INDEX IF NOT EXISTS idx_learning_modules_status ON public.learning_modules(status);
+
+-- 7.4 Tabel LEARNING_MODULE_SOURCES (Source-to-Module Reference Documents)
+CREATE TABLE IF NOT EXISTS public.learning_module_sources (
+    id BIGSERIAL PRIMARY KEY,
+    uid CHAR(26) UNIQUE NOT NULL,
+    module_id BIGINT NOT NULL REFERENCES public.learning_modules(id) ON DELETE CASCADE,
+    branch_id BIGINT NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
+    storage_disk VARCHAR(30) NOT NULL DEFAULT 'private',
+    file_path VARCHAR(255) NOT NULL,
+    mime_type VARCHAR(60) NOT NULL,
+    file_size_bytes INT NOT NULL,
+    extracted_text TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 7.5 Bridge Column pada Tabel REPORTS
+ALTER TABLE public.reports 
+ADD COLUMN IF NOT EXISTS learning_module_id BIGINT REFERENCES public.learning_modules(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_reports_learning_module_id ON public.reports(learning_module_id);
+
+-- Compatibility View
+CREATE OR REPLACE VIEW public.student_reports AS 
+SELECT * FROM public.reports;
+

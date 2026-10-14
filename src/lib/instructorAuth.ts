@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/utils/supabase/admin'
 import { User } from '@supabase/supabase-js'
+import { reassignInstructorModules } from '@/lib/modules/moduleService'
 
 export interface InstructorMember {
   id: string
@@ -585,6 +586,13 @@ export async function removeInstructorMember(userId: string, currentAdminId: str
     throw new Error(
       `Instruktur ini masih mengampu ${studentCount} murid aktif. Harap pindahkan (transfer) seluruh murid ke pengajar lain terlebih dahulu sebelum menghapus akun ini.`
     )
+  }
+
+  // 2.5 Safe Offboarding: Reassign any learning curriculum modules to Admin
+  try {
+    await reassignInstructorModules(userId, currentAdminId)
+  } catch (modErr) {
+    console.error('Warning reassigning learning modules during offboarding:', modErr)
   }
 
   // 3. Delete from auth.users

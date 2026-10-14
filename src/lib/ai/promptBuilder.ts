@@ -36,6 +36,11 @@ interface PromptBuilderParams {
   behavior: string
   category: string
   language?: 'id' | 'en'
+  moduleContext?: {
+    topic: string
+    milestoneSummary: string
+    recommendedPractice: string
+  }
 }
 
 export async function buildAiPrompt({
@@ -46,7 +51,8 @@ export async function buildAiPrompt({
   materi = '',
   behavior,
   category,
-  language = 'id'
+  language = 'id',
+  moduleContext
 }: PromptBuilderParams): Promise<string> {
   const cleanMateri = materi ? sanitizeInput(materi) : ''
   const cleanBehavior = sanitizeInput(behavior)
@@ -130,7 +136,7 @@ Now, generate the content using today's data:
 - Subject: ${student.subject}
 - Meeting number: ${meetingNo}
 - Student name: ${student.name}
-${cleanMateri ? `- Lesson material/topic: ${cleanMateri}\n` : ''}- Student behavior & observations: ${cleanBehavior}
+${moduleContext ? `- Linked Curriculum Lesson Module: ${moduleContext.topic}\n- Curriculum Pillar 1 Milestone Reference: ${moduleContext.milestoneSummary}\n- Curriculum Pillar 3 Practice Recommendation Reference: ${moduleContext.recommendedPractice}\n` : ''}${cleanMateri ? `- Lesson material/topic: ${cleanMateri}\n` : ''}- Student behavior & observations: ${cleanBehavior}
 
 Output Rules:
 1. Return ONLY a valid JSON object. No explanation, no markdown blocks.
@@ -165,7 +171,7 @@ Sekarang, buat isi laporan dengan data hari ini:
 - Mata pelajaran / kelas: ${student.subject}
 - Meeting ke: ${meetingNo}
 - Nama murid: ${student.name}
-${cleanMateri ? `- Materi / Topik: ${cleanMateri}\n` : ''}- Behavior dan observasi guru terhadap murid: ${cleanBehavior}
+${moduleContext ? `- Modul Kurikulum Terpilih: ${moduleContext.topic}\n- Acuan Milestone Materi (Pilar 1): ${moduleContext.milestoneSummary}\n- Acuan Rekomendasi Latihan (Pilar 3): ${moduleContext.recommendedPractice}\n` : ''}${cleanMateri ? `- Materi / Topik: ${cleanMateri}\n` : ''}- Behavior dan observasi guru terhadap murid: ${cleanBehavior}
 
 Aturan Output:
 1. Kembalikan HANYA objek JSON valid. Jangan ada penjelasan tambahan atau blok markdown.
