@@ -19,7 +19,8 @@ import {
   History,
   MessageCircle,
   FileText,
-  Camera
+  Camera,
+  ExternalLink
 } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 import { APP_CONFIG } from '@/lib/branding'
@@ -36,6 +37,14 @@ export interface ParsedReport {
   teachersNote: string
   trainingRecommendation: string
   parentNote: string
+  learning_module_id?: number | null
+  linked_module?: {
+    share_token: string
+    topic_title: string
+    topic_subtitle?: string
+    duration_minutes: number
+    is_link_shared: boolean
+  } | null
 }
 
 interface ParentDashboardProps {
@@ -442,6 +451,47 @@ export default function ParentDashboard({ student, reports }: ParentDashboardPro
                           </div>
                         )}
 
+                        {/* Interactive Learning Module & Worksheet (LKPD) Card */}
+                        {latestReport.linked_module && latestReport.linked_module.is_link_shared && (
+                          <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-2 border-emerald-300/80 space-y-2.5 relative z-10 shadow-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black uppercase tracking-wider text-emerald-800 font-[var(--font-rounded,sans-serif)] flex items-center gap-1.5">
+                                <BookOpen className="w-4 h-4 text-[#4da23c]" />
+                                Modul Belajar & Lembar Kerja (LKPD) Hari Ini
+                              </span>
+                              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-200/80 text-emerald-900 font-mono">
+                                Akses Interaktif
+                              </span>
+                            </div>
+
+                            <div>
+                              <h4 className="text-sm sm:text-base font-extrabold text-neutral-900 font-[var(--font-rounded,sans-serif)]">
+                                {latestReport.linked_module.topic_title}
+                              </h4>
+                              {latestReport.linked_module.topic_subtitle && (
+                                <p className="text-xs text-neutral-600 mt-0.5 italic">
+                                  {latestReport.linked_module.topic_subtitle}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="pt-1 flex items-center justify-between flex-wrap gap-2">
+                              <span className="text-xs font-mono text-neutral-600">
+                                ⏱️ Estimasi Belajar: {latestReport.linked_module.duration_minutes || 60} Menit
+                              </span>
+                              <a
+                                href={`/learn/${latestReport.linked_module.share_token}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#4da23c] hover:bg-[#438f34] text-white text-xs font-bold font-[var(--font-rounded,sans-serif)] transition-all shadow-xs cursor-pointer"
+                              >
+                                <span>Buka Modul & LKPD</span>
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Dokumentasi Foto Kelas */}
                         {latestReport.image_url && (
                           <div className="space-y-2.5 relative z-10">
@@ -614,6 +664,24 @@ export default function ParentDashboard({ student, reports }: ParentDashboardPro
                                             </span>
                                           </div>
                                         </div>
+                                      </div>
+                                    )}
+
+                                    {/* Linked Module Link in History item */}
+                                    {report.linked_module && report.linked_module.is_link_shared && (
+                                      <div className="pt-2 border-t border-emerald-100 flex items-center justify-between">
+                                        <span className="text-xs font-bold text-neutral-600 font-[var(--font-rounded,sans-serif)]">
+                                          Materi: {report.linked_module.topic_title}
+                                        </span>
+                                        <a
+                                          href={`/learn/${report.linked_module.share_token}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 text-xs font-bold text-[#4da23c] hover:underline"
+                                        >
+                                          <BookOpen className="w-3.5 h-3.5" />
+                                          <span>Buka LKPD Sesi Ini ↗</span>
+                                        </a>
                                       </div>
                                     )}
 

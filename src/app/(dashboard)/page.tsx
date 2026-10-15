@@ -454,18 +454,38 @@ export default function LaporanBuilderPage() {
         updated_at: new Date().toISOString()
       }
 
-      let { error: insertErr } = await supabase.from('reports').insert(reportPayload)
+      let insertedReportId: string | null = null
+      let { data: insertedData, error: insertErr } = await supabase.from('reports').insert(reportPayload).select('id').maybeSingle()
+      if (insertedData?.id) insertedReportId = insertedData.id
 
       // Fallback in case remote database doesn't have learning_module_id column yet
       if (insertErr && insertErr.message?.includes('learning_module_id')) {
         const fallbackPayload = { ...reportPayload }
         delete (fallbackPayload as any).learning_module_id
-        const fallbackRes = await supabase.from('reports').insert(fallbackPayload)
+        const fallbackRes = await supabase.from('reports').insert(fallbackPayload).select('id').maybeSingle()
         insertErr = fallbackRes.error
+        if (fallbackRes.data?.id) insertedReportId = fallbackRes.data.id
       }
 
       if (insertErr) {
         throw new Error(insertErr.message)
+      }
+
+      // If linkedModule is selected, ensure fallback cache mapping is updated as safeguard
+      if (insertedReportId && linkedModule?.id) {
+        try {
+          const { data: linkSetting } = await supabase
+            .from('app_settings')
+            .select('value')
+            .eq('key', 'cache_report_module_links')
+            .maybeSingle()
+          const currentLinks = linkSetting?.value ? JSON.parse(linkSetting.value) : {}
+          currentLinks[insertedReportId] = linkedModule.id
+          await supabase.from('app_settings').upsert({
+            key: 'cache_report_module_links',
+            value: JSON.stringify(currentLinks)
+          }, { onConflict: 'key' })
+        } catch {}
       }
 
       const { count: reportsCount } = await supabase

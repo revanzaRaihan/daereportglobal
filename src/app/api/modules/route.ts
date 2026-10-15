@@ -62,16 +62,21 @@ export async function POST(request: NextRequest) {
       subject_name,
       grade_level,
       topic_title,
+      topic_subtitle,
       language_code = 'id',
       duration_minutes = 60,
       teacher_guide_json,
+      student_article_json,
+      student_lkpd_json,
       student_handout_json,
       report_seed_json,
+      is_link_shared = true,
+      show_hints_on_web = true,
       visibility_scope = 'branch',
       status = 'draft'
     } = body
 
-    if (!subject_name || !grade_level || !topic_title || !teacher_guide_json || !student_handout_json) {
+    if (!subject_name || !grade_level || !topic_title || !teacher_guide_json) {
       return NextResponse.json({
         success: false,
         message: 'Data modul tidak lengkap. Harap isi semua komponen materi.'
@@ -94,14 +99,19 @@ export async function POST(request: NextRequest) {
       subjectName: String(subject_name),
       gradeLevel: String(grade_level),
       topicTitle: String(topic_title),
+      topicSubtitle: topic_subtitle ? String(topic_subtitle) : undefined,
       languageCode: language_code === 'en' ? 'en' : 'id',
       durationMinutes: Number(duration_minutes) || 60,
       teacherGuideJson: teacher_guide_json,
+      studentArticleJson: student_article_json,
+      studentLkpdJson: student_lkpd_json,
       studentHandoutJson: student_handout_json,
       reportSeedJson: report_seed_json || {
         pillar_1_milestone_summary: `Mempelajari topik ${topic_title} pada materi ${subject_name}.`,
         pillar_3_recommended_practice: `Latihan mandiri pemecahan masalah materi ${topic_title}.`
       },
+      isLinkShared: Boolean(is_link_shared),
+      showHintsOnWeb: Boolean(show_hints_on_web),
       visibilityScope: visibility_scope === 'private' ? 'private' : 'branch',
       status: status === 'published' ? 'published' : 'draft'
     })

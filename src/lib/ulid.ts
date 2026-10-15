@@ -39,3 +39,18 @@ export function isValidUlid(uid: string): boolean {
   if (typeof uid !== 'string' || uid.length !== 26) return false
   return /^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/i.test(uid)
 }
+
+/**
+ * Generates a revocable, cryptographic share token for public zero-login LMS links (/learn/{share_token}).
+ * Length: ~52 characters (prefix 'lrn_' + 48 hex characters).
+ */
+export function generateShareToken(): string {
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const bytes = new Uint8Array(24)
+    crypto.getRandomValues(bytes)
+    const randomHex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+    return `lrn_${randomHex}`
+  }
+  return `lrn_${Math.random().toString(36).substring(2)}${Date.now().toString(36)}${Math.random().toString(36).substring(2)}`
+}
+

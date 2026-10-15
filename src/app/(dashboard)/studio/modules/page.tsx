@@ -268,9 +268,12 @@ export default function ModuleStudioPage() {
           subject_name: wizardSubject,
           grade_level: wizardGradeLevel,
           topic_title: wizardTopicTitle,
+          topic_subtitle: generatedPayload.metadata?.topic_subtitle || undefined,
           language_code: wizardLanguage,
           duration_minutes: wizardDuration,
           teacher_guide_json: generatedPayload.teacher_guide_json,
+          student_article_json: generatedPayload.student_article_json,
+          student_lkpd_json: generatedPayload.student_lkpd_json,
           student_handout_json: generatedPayload.student_handout_json,
           report_seed_json: generatedPayload.report_seed_json,
           visibility_scope: 'branch',
@@ -613,6 +616,19 @@ export default function ModuleStudioPage() {
                     >
                       <Eye className="w-4 h-4" />
                     </button>
+
+                    {/* Open Public Student LMS Reader */}
+                    {item.share_token && (
+                      <a
+                        href={`/learn/${item.share_token}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Buka Tampilan Siswa (LMS Reader Zero-Login)"
+                        className="p-2 rounded-lg text-text-secondary hover:text-blue-500 hover:bg-blue-500/10 transition cursor-pointer"
+                      >
+                        <Share2 className="w-4 h-4" />
+                      </a>
+                    )}
 
                     {/* Export PDF LKPD direct */}
                     <button
@@ -1038,24 +1054,28 @@ export default function ModuleStudioPage() {
                   {activeTab === 'teacher' && (
                     <div className="space-y-4">
                       {/* Alignment */}
-                      <div className="p-4 rounded-2xl bg-background border border-border-color space-y-2">
-                        <div className="flex items-center gap-2 text-xs font-bold text-accent uppercase tracking-wider">
-                          <Target className="w-4 h-4" />
-                          <span>Penyelarasan Kurikulum ({generatedPayload.curriculum_alignment.framework_code})</span>
+                      {(generatedPayload.curriculum_alignment || generatedPayload.teacher_guide_json.learning_objectives) && (
+                        <div className="p-4 rounded-2xl bg-background border border-border-color space-y-2">
+                          <div className="flex items-center gap-2 text-xs font-bold text-accent uppercase tracking-wider">
+                            <Target className="w-4 h-4" />
+                            <span>Penyelarasan Kurikulum ({wizardFrameworkCode})</span>
+                          </div>
+                          {generatedPayload.curriculum_alignment?.learning_outcomes_cp && (
+                            <div className="text-xs">
+                              <strong className="text-text-primary block mb-0.5">Capaian Pembelajaran (CP / Learning Outcomes):</strong>
+                              <p className="text-text-secondary leading-relaxed">{generatedPayload.curriculum_alignment.learning_outcomes_cp}</p>
+                            </div>
+                          )}
+                          <div className="text-xs">
+                            <strong className="text-text-primary block mb-0.5">Tujuan Pembelajaran (TP):</strong>
+                            <ul className="list-disc list-inside text-text-secondary space-y-0.5">
+                              {(generatedPayload.curriculum_alignment?.learning_objectives_tp || generatedPayload.teacher_guide_json.learning_objectives || []).map((tp: string, idx: number) => (
+                                <li key={idx}>{tp}</li>
+                              ))}
+                            </ul>
+                          </div>
                         </div>
-                        <div className="text-xs">
-                          <strong className="text-text-primary block mb-0.5">Capaian Pembelajaran (CP / Learning Outcomes):</strong>
-                          <p className="text-text-secondary leading-relaxed">{generatedPayload.curriculum_alignment.learning_outcomes_cp}</p>
-                        </div>
-                        <div className="text-xs">
-                          <strong className="text-text-primary block mb-0.5">Tujuan Pembelajaran (TP):</strong>
-                          <ul className="list-disc list-inside text-text-secondary space-y-0.5">
-                            {generatedPayload.curriculum_alignment.learning_objectives_tp.map((tp, idx) => (
-                              <li key={idx}>{tp}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
+                      )}
 
                       {/* Hook & Analogy */}
                       <div className="p-4 rounded-2xl bg-background border border-border-color space-y-1.5">
@@ -1120,25 +1140,27 @@ export default function ModuleStudioPage() {
                           </ul>
                         </div>
 
-                        <div className="p-4 rounded-2xl bg-background border border-border-color space-y-2">
-                          <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider block">
-                            Tips Diferensiasi Belajar
-                          </span>
-                          <div className="text-xs space-y-1">
-                            <strong className="text-text-primary block text-[11px]">Siswa Cepat (Fast Learners):</strong>
-                            <p className="text-text-secondary">{generatedPayload.teacher_guide_json.differentiation_tips.fast_learners}</p>
+                        {generatedPayload.teacher_guide_json.differentiation_tips && (
+                          <div className="p-4 rounded-2xl bg-background border border-border-color space-y-2">
+                            <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider block">
+                              Tips Diferensiasi Belajar
+                            </span>
+                            <div className="text-xs space-y-1">
+                              <strong className="text-text-primary block text-[11px]">Siswa Cepat (Fast Learners):</strong>
+                              <p className="text-text-secondary">{generatedPayload.teacher_guide_json.differentiation_tips.fast_learners || '-'}</p>
+                            </div>
+                            <div className="text-xs space-y-1">
+                              <strong className="text-text-primary block text-[11px]">Siswa Butuh Bimbingan:</strong>
+                              <p className="text-text-secondary">{generatedPayload.teacher_guide_json.differentiation_tips.struggling_students || '-'}</p>
+                            </div>
                           </div>
-                          <div className="text-xs space-y-1">
-                            <strong className="text-text-primary block text-[11px]">Siswa Butuh Bimbingan:</strong>
-                            <p className="text-text-secondary">{generatedPayload.teacher_guide_json.differentiation_tips.struggling_students}</p>
-                          </div>
-                        </div>
+                        )}
                       </div>
                     </div>
                   )}
 
                   {/* TAB B: STUDENT HANDOUT / LKPD */}
-                  {activeTab === 'student' && (
+                  {activeTab === 'student' && generatedPayload.student_handout_json && (
                     <div className="p-6 rounded-2xl bg-white text-neutral-900 border border-neutral-300 shadow-sm space-y-5 font-sans">
                       
                       {/* Branded White-Label Header */}
@@ -1179,7 +1201,7 @@ export default function ModuleStudioPage() {
                           </strong>
                           <p className="font-semibold text-neutral-800">{generatedPayload.student_handout_json.worked_example.problem}</p>
                           <ol className="list-decimal list-inside text-neutral-700 space-y-1">
-                            {generatedPayload.student_handout_json.worked_example.step_by_step_solution.map((step, idx) => (
+                            {(generatedPayload.student_handout_json.worked_example.step_by_step_solution || []).map((step: string, idx: number) => (
                               <li key={idx}>{step}</li>
                             ))}
                           </ol>
@@ -1191,10 +1213,10 @@ export default function ModuleStudioPage() {
                         <strong className="text-xs font-black uppercase tracking-wider text-neutral-800 block">
                           📝 Aktivitas & Lembar Latihan:
                         </strong>
-                        {generatedPayload.student_handout_json.worksheet_activities.map((act) => (
+                        {(generatedPayload.student_handout_json.worksheet_activities || []).map((act: any) => (
                           <div key={act.activity_number} className="p-4 rounded-xl border border-neutral-200 space-y-3">
                             <div className="flex items-center justify-between text-xs font-bold text-neutral-800">
-                              <span>Aktivitas #{act.activity_number}: {act.activity_type.replace('_', ' ').toUpperCase()}</span>
+                              <span>Aktivitas #{act.activity_number}: {String(act.activity_type || '').replace('_', ' ').toUpperCase()}</span>
                             </div>
                             <p className="text-xs text-neutral-700">{act.instruction}</p>
                             

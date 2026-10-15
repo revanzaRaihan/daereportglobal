@@ -1,11 +1,15 @@
 import { createAdminClient } from '@/utils/supabase/admin'
-import { generateUlid } from '@/lib/ulid'
+import { generateUlid, generateShareToken } from '@/lib/ulid'
+import { APP_CONFIG } from '@/lib/branding'
 import { SYSTEM_FRAMEWORK_PRESETS } from './presets'
 import { 
   LearningFramework, 
   LearningModule, 
-  LearningModuleSource,
-  AiGeneratedModulePayload 
+  PublicLearnerModule,
+  StudentArticleJson,
+  StudentLkpdJson,
+  TeacherGuideJson,
+  ReportSeedJson
 } from './types'
 
 const DEFAULT_BRANCH_ID = 1
@@ -23,7 +27,8 @@ async function getFallbackModules(): Promise<LearningModule[]> {
       .eq('key', 'cache_learning_modules')
       .maybeSingle()
     if (!data?.value) return []
-    return JSON.parse(data.value) as LearningModule[]
+    const parsed = JSON.parse(data.value) as any[]
+    return parsed.map(normalizeModuleV2)
   } catch {
     return []
   }
@@ -42,6 +47,121 @@ async function saveFallbackModules(modules: LearningModule[]): Promise<void> {
       })
   } catch (err) {
     console.error('Failed to save fallback modules to app_settings:', err)
+  }
+}
+
+/**
+ * Normalizes a module record to ensure complete V2 LMS Article & LKPD structure.
+ */
+export function normalizeModuleV2(item: any): LearningModule {
+  const shareToken = item.share_token || generateShareToken()
+  const topicSubtitle = item.topic_subtitle || 'Eksplorasi Konsep & Lembar Kerja Mandiri'
+  const isLinkShared = item.is_link_shared !== undefined ? Boolean(item.is_link_shared) : true
+  const showHintsOnWeb = item.show_hints_on_web !== undefined ? Boolean(item.show_hints_on_web) : true
+
+  // Synthesize student_article_json if missing (from legacy student_handout_json)
+  let studentArticle: StudentArticleJson = item.student_article_json
+  if (!studentArticle && item.student_handout_json) {
+    studentArticle = {
+      hero_callout: {
+        emoji: '🚀',
+        title: 'Tujuan & Relevansi Dunia Nyata',
+        body: item.student_handout_json.concept_summary || 'Pelajari konsep inti pada sesi pembelajaran kali ini dengan pendekatan interaktif.'
+      },
+      article_sections: [
+        {
+          section_order: 1,
+          heading: 'Pemahaman Konsep & Eksplorasi',
+          content_markdown: item.student_handout_json.concept_summary || 'Pelajari konsep dan terapkan dalam latihan mandiri.',
+          fun_callout_box: {
+            type: 'pro_tip',
+            title: 'Tips Guru',
+            content: 'Fokus pada pemahaman logika dan coba bereksperimen dengan contoh yang diberikan.'
+          },
+          worked_example: item.student_handout_json.worked_example ? {
+            scenario: item.student_handout_json.worked_example.problem || 'Studi Kasus Pembelajaran',
+            steps: item.student_handout_json.worked_example.step_by_step_solution || ['Langkah 1: Analisis masalah', 'Langkah 2: Terapkan solusi'],
+            takeaway: 'Uji setiap langkah secara bertahap.'
+          } : null
+        }
+      ],
+      key_vocabulary: [
+        { term: item.subject_name || 'Materi', simple_definition: 'Fokus bidang pembelajaran pada modul ini.' }
+      ]
+    }
+  }
+
+  // Synthesize student_lkpd_json if missing (from legacy student_handout_json)
+  let studentLkpd: StudentLkpdJson = item.student_lkpd_json
+  if (!studentLkpd && item.student_handout_json) {
+    studentLkpd = {
+      missions: (item.student_handout_json.worksheet_activities || []).map((act: any, idx: number) => ({
+        mission_number: act.activity_number || idx + 1,
+        mission_title: `Misi ${act.activity_number || idx + 1}: ${act.activity_type === 'creative_challenge' ? 'Boss Challenge' : (idx === 0 ? 'Pemanasan' : 'Latihan Inti')}`,
+        mission_type: idx === 0 ? 'warm_up' : (idx === 1 ? 'core_practice' : 'boss_challenge'),
+        instruction: act.instruction || '',
+        interactive_hint: 'Coba baca kembali ringkasan materi dan worked example di atas.',
+        workspace_placeholder: act.workspace_prompt || 'Tuliskan jawaban atau kode solusi Anda di sini...'
+      })),
+      self_reflection_check: [
+        'Saya dapat menjelaskan konsep utama dengan kata-kata sendiri.',
+        'Saya menyelesaikan tantangan misi pemanasan dan latihan inti.'
+      ]
+    }
+  }
+
+  // Fallback defaults if still empty
+  if (!studentArticle) {
+    studentArticle = {
+      hero_callout: { emoji: '🚀', title: 'Why Does This Matter?', body: 'Pelajari konsep penting ini untuk meningkatkan pemahaman Anda.' },
+      article_sections: [
+        {
+          section_order: 1,
+          heading: 'Pengenalan Materi',
+          content_markdown: 'Modul ini memandu Anda memahami topik ini secara terstruktur.',
+          fun_callout_box: { type: 'fun_fact', title: 'Tahukah Kamu?', content: 'Konsep ini banyak digunakan dalam industri modern.' },
+          worked_example: { scenario: 'Contoh', steps: ['Langkah 1'], takeaway: 'Pahami polanya.' }
+        }
+      ],
+      key_vocabulary: [{ term: 'Konsep Dasar', simple_definition: 'Prinsip utama yang dipelajari.' }]
+    }
+  }
+
+  if (!studentLkpd) {
+    studentLkpd = {
+      missions: [
+        {
+          mission_number: 1,
+          mission_title: 'Misi 1: Pemanasan Konsep',
+          mission_type: 'warm_up',
+          instruction: 'Selesaikan tantangan awal untuk memverifikasi pemahaman Anda.',
+          interactive_hint: 'Tinjau kembali bagian artikel di atas.',
+          workspace_placeholder: 'Tuliskan jawaban Anda di sini...'
+        }
+      ],
+      self_reflection_check: ['Saya memahami materi modul ini dengan baik.']
+    }
+  }
+
+  return {
+    ...item,
+    share_token: shareToken,
+    topic_subtitle: topicSubtitle,
+    is_link_shared: isLinkShared,
+    show_hints_on_web: showHintsOnWeb,
+    student_article_json: studentArticle,
+    student_lkpd_json: studentLkpd,
+    teacher_guide_json: item.teacher_guide_json || {
+      learning_objectives: [],
+      icebreaker_hook: '',
+      timeline_steps: [],
+      common_misconceptions: [],
+      answer_keys: []
+    },
+    report_seed_json: item.report_seed_json || {
+      pillar_1_milestone_summary: '',
+      pillar_3_recommended_practice: ''
+    }
   }
 }
 
@@ -139,25 +259,9 @@ export async function getModules(filter: ListModulesFilter): Promise<LearningMod
 
         let list: LearningModule[] = data.map((item: any) => {
           const fw = item.framework || frameworkMap.get(item.framework_id)
+          const normalized = normalizeModuleV2(item)
           return {
-            id: item.id,
-            uid: item.uid,
-            branch_id: item.branch_id,
-            author_id: item.author_id,
-            framework_id: item.framework_id,
-            subject_name: item.subject_name,
-            grade_level: item.grade_level,
-            topic_title: item.topic_title,
-            language_code: item.language_code,
-            duration_minutes: item.duration_minutes,
-            teacher_guide_json: item.teacher_guide_json,
-            student_handout_json: item.student_handout_json,
-            report_seed_json: item.report_seed_json,
-            visibility_scope: item.visibility_scope,
-            status: item.status,
-            created_at: item.created_at,
-            updated_at: item.updated_at,
-            deleted_at: item.deleted_at,
+            ...normalized,
             framework_code: fw?.code || '',
             framework_name: fw?.name || ''
           }
@@ -171,6 +275,7 @@ export async function getModules(filter: ListModulesFilter): Promise<LearningMod
           const q = filter.search.toLowerCase()
           list = list.filter(m => 
             m.topic_title.toLowerCase().includes(q) ||
+            (m.topic_subtitle && m.topic_subtitle.toLowerCase().includes(q)) ||
             m.subject_name.toLowerCase().includes(q) ||
             m.grade_level.toLowerCase().includes(q)
           )
@@ -220,6 +325,7 @@ export async function getModules(filter: ListModulesFilter): Promise<LearningMod
     const q = filter.search.toLowerCase()
     list = list.filter(m => 
       m.topic_title.toLowerCase().includes(q) ||
+      (m.topic_subtitle && m.topic_subtitle.toLowerCase().includes(q)) ||
       m.subject_name.toLowerCase().includes(q) ||
       m.grade_level.toLowerCase().includes(q)
     )
@@ -229,7 +335,7 @@ export async function getModules(filter: ListModulesFilter): Promise<LearningMod
 }
 
 /**
- * Fetch a single module by its public Anti-IDOR UID.
+ * Fetch a single module by its internal studio UID.
  */
 export async function getModuleByUid(
   uid: string, 
@@ -257,25 +363,9 @@ export async function getModuleByUid(
           return null
         }
 
+        const normalized = normalizeModuleV2(data)
         return {
-          id: data.id,
-          uid: data.uid,
-          branch_id: data.branch_id,
-          author_id: data.author_id,
-          framework_id: data.framework_id,
-          subject_name: data.subject_name,
-          grade_level: data.grade_level,
-          topic_title: data.topic_title,
-          language_code: data.language_code,
-          duration_minutes: data.duration_minutes,
-          teacher_guide_json: data.teacher_guide_json,
-          student_handout_json: data.student_handout_json,
-          report_seed_json: data.report_seed_json,
-          visibility_scope: data.visibility_scope,
-          status: data.status,
-          created_at: data.created_at,
-          updated_at: data.updated_at,
-          deleted_at: data.deleted_at,
+          ...normalized,
           framework_code: data.framework?.code,
           framework_name: data.framework?.name
         }
@@ -300,6 +390,83 @@ export async function getModuleByUid(
 }
 
 /**
+ * Fetch a public sanitized module by its zero-login share token.
+ * SECURITY GUARDRAIL: Teacher Guide and Answer Keys are completely stripped!
+ */
+export async function getPublicModuleByShareToken(token: string): Promise<PublicLearnerModule | null> {
+  if (!token || typeof token !== 'string') return null
+  const cleanToken = token.trim()
+
+  const adminClient = createAdminClient()
+  let rawModule: any = null
+
+  if (adminClient) {
+    try {
+      const { data, error } = await adminClient
+        .from('learning_modules')
+        .select(`
+          share_token,
+          topic_title,
+          topic_subtitle,
+          subject_name,
+          grade_level,
+          duration_minutes,
+          language_code,
+          student_article_json,
+          student_lkpd_json,
+          student_handout_json,
+          is_link_shared,
+          show_hints_on_web,
+          deleted_at,
+          framework:learning_frameworks(name)
+        `)
+        .eq('share_token', cleanToken)
+        .is('deleted_at', null)
+        .maybeSingle()
+
+      if (!error && data) {
+        rawModule = data
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
+  if (!rawModule) {
+    const list = await getFallbackModules()
+    rawModule = list.find(m => m.share_token === cleanToken && !m.deleted_at)
+  }
+
+  if (!rawModule) return null
+
+  // If sharing is revoked/disabled, refuse public access
+  if (rawModule.is_link_shared === false) return null
+
+  const normalized = normalizeModuleV2(rawModule)
+
+  const estimatedMins = Math.max(5, Math.round((normalized.duration_minutes || 60) * 0.25))
+
+  return {
+    share_token: normalized.share_token,
+    topic_title: normalized.topic_title,
+    topic_subtitle: normalized.topic_subtitle || 'Eksplorasi Konsep & Lembar Kerja Mandiri',
+    subject_name: normalized.subject_name,
+    grade_level: normalized.grade_level,
+    duration_minutes: normalized.duration_minutes,
+    language_code: normalized.language_code,
+    estimated_read_mins: estimatedMins,
+    difficulty_badge: normalized.duration_minutes > 75 ? 'Challenger' : (normalized.duration_minutes > 45 ? 'Intermediate' : 'Beginner'),
+    curriculum_tags: [normalized.framework_name || normalized.subject_name, normalized.grade_level],
+    student_article_json: normalized.student_article_json,
+    student_lkpd_json: normalized.student_lkpd_json,
+    show_hints_on_web: normalized.show_hints_on_web,
+    framework_name: normalized.framework_name,
+    branch_name: APP_CONFIG.name,
+    institution_logo: APP_CONFIG.logoPath
+  }
+}
+
+/**
  * Create a new learning module.
  */
 export async function createModule(
@@ -311,39 +478,51 @@ export async function createModule(
     subjectName: string
     gradeLevel: string
     topicTitle: string
+    topicSubtitle?: string
     languageCode?: 'id' | 'en'
     durationMinutes?: number
-    teacherGuideJson: any
-    studentHandoutJson: any
-    reportSeedJson: any
+    teacherGuideJson: TeacherGuideJson
+    studentArticleJson?: StudentArticleJson
+    studentLkpdJson?: StudentLkpdJson
+    studentHandoutJson?: any
+    reportSeedJson: ReportSeedJson
+    isLinkShared?: boolean
+    showHintsOnWeb?: boolean
     visibilityScope?: 'private' | 'branch'
     status?: 'draft' | 'published' | 'archived'
   }
 ): Promise<LearningModule> {
   const branchId = params.branchId || DEFAULT_BRANCH_ID
   const uid = generateUlid()
+  const shareToken = generateShareToken()
   const now = new Date().toISOString()
 
-  const moduleData: Omit<LearningModule, 'id'> = {
+  const normalized = normalizeModuleV2({
     uid,
+    share_token: shareToken,
     branch_id: branchId,
     author_id: params.authorId,
     framework_id: params.frameworkId,
     subject_name: params.subjectName,
     grade_level: params.gradeLevel,
     topic_title: params.topicTitle,
+    topic_subtitle: params.topicSubtitle || 'Eksplorasi Konsep & Lembar Kerja Mandiri',
     language_code: params.languageCode || 'id',
     duration_minutes: params.durationMinutes || 60,
     teacher_guide_json: params.teacherGuideJson,
+    student_article_json: params.studentArticleJson,
+    student_lkpd_json: params.studentLkpdJson,
     student_handout_json: params.studentHandoutJson,
     report_seed_json: params.reportSeedJson,
+    is_link_shared: params.isLinkShared !== undefined ? params.isLinkShared : true,
+    show_hints_on_web: params.showHintsOnWeb !== undefined ? params.showHintsOnWeb : true,
     visibility_scope: params.visibilityScope || 'branch',
     status: params.status || 'draft',
     created_at: now,
     updated_at: now,
     deleted_at: null,
     framework_code: params.frameworkCode
-  }
+  })
 
   const adminClient = createAdminClient()
   if (adminClient) {
@@ -351,29 +530,35 @@ export async function createModule(
       const { data, error } = await adminClient
         .from('learning_modules')
         .insert({
-          uid: moduleData.uid,
-          branch_id: moduleData.branch_id,
-          author_id: moduleData.author_id,
-          framework_id: moduleData.framework_id,
-          subject_name: moduleData.subject_name,
-          grade_level: moduleData.grade_level,
-          topic_title: moduleData.topic_title,
-          language_code: moduleData.language_code,
-          duration_minutes: moduleData.duration_minutes,
-          teacher_guide_json: moduleData.teacher_guide_json,
-          student_handout_json: moduleData.student_handout_json,
-          report_seed_json: moduleData.report_seed_json,
-          visibility_scope: moduleData.visibility_scope,
-          status: moduleData.status,
-          created_at: moduleData.created_at,
-          updated_at: moduleData.updated_at
+          uid: normalized.uid,
+          share_token: normalized.share_token,
+          branch_id: normalized.branch_id,
+          author_id: normalized.author_id,
+          framework_id: normalized.framework_id,
+          subject_name: normalized.subject_name,
+          grade_level: normalized.grade_level,
+          topic_title: normalized.topic_title,
+          topic_subtitle: normalized.topic_subtitle,
+          language_code: normalized.language_code,
+          duration_minutes: normalized.duration_minutes,
+          teacher_guide_json: normalized.teacher_guide_json,
+          student_article_json: normalized.student_article_json,
+          student_lkpd_json: normalized.student_lkpd_json,
+          student_handout_json: normalized.student_handout_json,
+          report_seed_json: normalized.report_seed_json,
+          is_link_shared: normalized.is_link_shared,
+          show_hints_on_web: normalized.show_hints_on_web,
+          visibility_scope: normalized.visibility_scope,
+          status: normalized.status,
+          created_at: normalized.created_at,
+          updated_at: normalized.updated_at
         })
         .select()
         .single()
 
       if (!error && data) {
         return {
-          ...data,
+          ...normalizeModuleV2(data),
           framework_code: params.frameworkCode
         }
       }
@@ -386,7 +571,7 @@ export async function createModule(
   const fallbackList = await getFallbackModules()
   const newId = fallbackList.length > 0 ? Math.max(...fallbackList.map(m => m.id)) + 1 : 1
   const fullModule: LearningModule = {
-    ...moduleData,
+    ...normalized,
     id: newId
   }
   fallbackList.unshift(fullModule)
@@ -429,7 +614,7 @@ export async function updateModule(
         .single()
 
       if (!error && data) {
-        return data
+        return normalizeModuleV2(data)
       }
     } catch {
       // Fallback
@@ -440,16 +625,29 @@ export async function updateModule(
   const fallbackList = await getFallbackModules()
   const index = fallbackList.findIndex(m => m.uid === uid)
   if (index !== -1) {
-    fallbackList[index] = {
+    fallbackList[index] = normalizeModuleV2({
       ...fallbackList[index],
       ...updates,
       updated_at: now
-    }
+    })
     await saveFallbackModules(fallbackList)
     return fallbackList[index]
   }
 
   throw new Error('Gagal memperbarui modul pembelajaran.')
+}
+
+/**
+ * Regenerates / rotates the share_token for a module to immediately revoke existing public links.
+ */
+export async function rotateShareToken(
+  uid: string,
+  userId: string,
+  isAdmin: boolean
+): Promise<string> {
+  const newToken = generateShareToken()
+  await updateModule(uid, { share_token: newToken }, userId, isAdmin)
+  return newToken
 }
 
 /**
@@ -473,11 +671,16 @@ export async function duplicateModule(
     subjectName: existing.subject_name,
     gradeLevel: existing.grade_level,
     topicTitle: `${existing.topic_title} (Salinan)`,
+    topicSubtitle: existing.topic_subtitle || undefined,
     languageCode: existing.language_code,
     durationMinutes: existing.duration_minutes,
     teacherGuideJson: JSON.parse(JSON.stringify(existing.teacher_guide_json)),
-    studentHandoutJson: JSON.parse(JSON.stringify(existing.student_handout_json)),
+    studentArticleJson: JSON.parse(JSON.stringify(existing.student_article_json)),
+    studentLkpdJson: JSON.parse(JSON.stringify(existing.student_lkpd_json)),
+    studentHandoutJson: existing.student_handout_json ? JSON.parse(JSON.stringify(existing.student_handout_json)) : undefined,
     reportSeedJson: JSON.parse(JSON.stringify(existing.report_seed_json)),
+    isLinkShared: true,
+    showHintsOnWeb: existing.show_hints_on_web,
     visibilityScope: 'branch',
     status: 'draft' // Cloned modules start as editable draft
   })

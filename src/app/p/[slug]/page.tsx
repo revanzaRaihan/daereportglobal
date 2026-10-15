@@ -135,20 +135,87 @@ async function getStudentAndReports(slug: string) {
     return null
   }
 
-  // 2. Fetch all reports for this student with specific columns
-  const { data: reports, error: reportsError } = await supabase
+  // 2. Fetch all reports for this student with resilient fallback
+  let reports: any[] = []
+  const { data: reportsWithModule, error: reportsWithModuleError } = await supabase
     .from('reports')
-    .select('id, meeting_number, report_date, materi, behavior, content, image_url')
+    .select('id, meeting_number, report_date, materi, behavior, content, image_url, learning_module_id')
     .eq('student_id', student.id)
     .order('report_date', { ascending: false })
     .order('meeting_number', { ascending: false })
 
-  if (reportsError) {
-    return null
+  if (!reportsWithModuleError && reportsWithModule) {
+    reports = reportsWithModule
+  } else {
+    const { data: reportsSimple, error: reportsSimpleError } = await supabase
+      .from('reports')
+      .select('id, meeting_number, report_date, materi, behavior, content, image_url')
+      .eq('student_id', student.id)
+      .order('report_date', { ascending: false })
+      .order('meeting_number', { ascending: false })
+
+    if (reportsSimpleError || !reportsSimple) {
+      return null
+    }
+    reports = reportsSimple
+  }
+
+  // Load report-module fallback mapping from app_settings
+  let fallbackLinks: Record<string, number> = {}
+  try {
+    const { data: linkSetting } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'cache_report_module_links')
+      .maybeSingle()
+    if (linkSetting?.value) {
+      fallbackLinks = JSON.parse(linkSetting.value)
+    }
+  } catch {}
+
+  // Fetch linked modules if any
+  const moduleIds = Array.from(new Set((reports || []).map(r => r.learning_module_id || fallbackLinks[r.id]).filter(Boolean)))
+  const moduleMap = new Map<number, { share_token: string; topic_title: string; topic_subtitle?: string; duration_minutes: number; is_link_shared: boolean }>()
+
+  if (moduleIds.length > 0) {
+    try {
+      const { data: moduleData } = await supabase
+        .from('learning_modules')
+        .select('id, share_token, topic_title, topic_subtitle, duration_minutes, is_link_shared')
+        .in('id', moduleIds)
+        .eq('is_link_shared', true)
+        .is('deleted_at', null)
+
+      if (moduleData) {
+        moduleData.forEach(m => moduleMap.set(m.id, m))
+      }
+    } catch {
+      // Table missing or fallback
+    }
+
+    if (moduleMap.size === 0) {
+      try {
+        const { getModules } = await import('@/lib/modules/moduleService')
+        const all = await getModules({ userId: '', isAdmin: true })
+        all.forEach(m => {
+          if (moduleIds.includes(m.id) && m.is_link_shared !== false) {
+            moduleMap.set(m.id, {
+              share_token: m.share_token,
+              topic_title: m.topic_title,
+              topic_subtitle: m.topic_subtitle || undefined,
+              duration_minutes: m.duration_minutes,
+              is_link_shared: m.is_link_shared
+            })
+          }
+        })
+      } catch {}
+    }
   }
 
   const parsedReports: ParsedReport[] = (reports || []).map(r => {
     const parsed = parseReportContent(r.content, r.materi)
+    const moduleId = r.learning_module_id || fallbackLinks[r.id]
+    const linked = moduleId ? moduleMap.get(moduleId) : null
     return {
       id: r.id,
       meeting_number: r.meeting_number,
@@ -156,6 +223,8 @@ async function getStudentAndReports(slug: string) {
       materi: r.materi,
       behavior: r.behavior,
       image_url: r.image_url,
+      learning_module_id: moduleId || null,
+      linked_module: linked || null,
       ...parsed
     }
   })
