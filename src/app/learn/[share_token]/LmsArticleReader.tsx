@@ -179,7 +179,10 @@ export default function LmsArticleReader({ module }: LmsArticleReaderProps) {
   const completionPercentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
 
   return (
-    <div className={`min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] transition-colors duration-300 font-sans selection:bg-[#4da23c]/20 selection:text-[#4da23c]`}>
+    <div 
+      data-lenis-prevent
+      className="min-h-screen select-text bg-[var(--bg-primary)] text-[var(--text-primary)] transition-colors duration-300 font-sans selection:bg-[#4da23c]/20 selection:text-[#4da23c]"
+    >
       
       {/* 1. TOP STICKY READING PROGRESS & ACTION BAR */}
       <header className="sticky top-0 z-50 bg-[var(--bg-primary)]/90 backdrop-blur-md border-b border-[var(--border-color)] print:hidden">
@@ -270,7 +273,7 @@ export default function LmsArticleReader({ module }: LmsArticleReaderProps) {
       </div>
 
       {/* 2. MAIN CONTAINER (2-COL DESKTOP / 1-COL MOBILE) */}
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 lg:py-12">
+      <article className="max-w-6xl mx-auto px-4 sm:px-6 py-8 lg:py-12">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
           
           {/* ============================================================== */}
@@ -778,7 +781,7 @@ export default function LmsArticleReader({ module }: LmsArticleReaderProps) {
           </aside>
 
         </div>
-      </main>
+      </article>
 
       {/* FOOTER */}
       <footer className="border-t border-[var(--border-color)] py-8 mt-12 bg-[var(--bg-secondary)] print:hidden">

@@ -1,11 +1,28 @@
 'use client'
 
 import { useEffect } from 'react'
+import { usePathname } from 'next/navigation'
 import Lenis from 'lenis'
 
 export default function LenisProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
+
   useEffect(() => {
-    const scrollContainer = document.querySelector('main') || undefined
+    // 1. Never hijack scrolling on LMS Reader and zero-login student view routes
+    if (pathname?.startsWith('/learn')) {
+      return
+    }
+
+    // 2. Only use <main> as wrapper IF it actually has an explicit scrollable overflow
+    const mainEl = document.querySelector('main')
+    let scrollContainer: HTMLElement | undefined = undefined
+
+    if (mainEl && mainEl instanceof HTMLElement) {
+      const style = window.getComputedStyle(mainEl)
+      if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+        scrollContainer = mainEl
+      }
+    }
 
     const lenis = new Lenis({
       duration: 1.1,
@@ -69,7 +86,7 @@ export default function LenisProvider({ children }: { children: React.ReactNode 
       window.removeEventListener('wheel', preventScrollHijack, { capture: true })
       window.removeEventListener('touchstart', preventScrollHijack, { capture: true })
     }
-  }, [])
+  }, [pathname])
 
   return <>{children}</>
 }

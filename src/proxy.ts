@@ -37,6 +37,7 @@ export async function updateSession(request: NextRequest) {
   const isApiRoute = request.nextUrl.pathname.startsWith('/api')
   const isStaticFile = request.nextUrl.pathname.match(/\.(png|jpg|jpeg|gif|svg|ico)$/)
   const isParentRoute = request.nextUrl.pathname.startsWith('/p/')
+  const isLearnRoute = request.nextUrl.pathname.startsWith('/learn')
   const authCode = request.nextUrl.searchParams.get('code')
 
   // Safeguard: jika Supabase melempar ?code=... ke root '/', arahkan langsung ke /auth/callback
@@ -46,7 +47,7 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(callbackUrl)
   }
 
-  if (!user && !isLoginPage && !isAuthRoute && !isApiRoute && !isStaticFile && !isParentRoute) {
+  if (!user && !isLoginPage && !isAuthRoute && !isApiRoute && !isStaticFile && !isParentRoute && !isLearnRoute) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
